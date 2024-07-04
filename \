@@ -8,53 +8,28 @@ def execute_node(node, main_graph, final_output_node, weight_dict):
     node_inputs = []
     node_outputs = []
 
-    added_quant_inputs, added_quant_outputs = expand_node_inputs_outputs(main_graph, node, weight_dict)
+    added_quant_inputs, added_quant_outputs = expand_node_inputs_outputs(main_graph, node)
     node_inputs += added_quant_inputs
     node_outputs += added_quant_outputs
 
     desired_node_outputs = [x for x in node_outputs if x.name == final_output_node]
     intermediate_node_outputs = [x for x in node_outputs if x.name != final_output_node]
-    
-    module = "decoder"
-    if module == "encoder":
-        fix_dictionary = {
-            "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
-            "Sub_2_out0": "/layers.0/sublayer.1/norm/Sub_output_0",
-            "Sub_4_out0": "/layers.1/sublayer.0/norm/Sub_output_0",
-            "Sub_6_out0": "/layers.1/sublayer.1/norm/Sub_output_0",
-            "Sub_8_out0": "/layers.2/sublayer.0/norm/Sub_output_0",
-            "Sub_10_out0": "/layers.2/sublayer.1/norm/Sub_output_0",
-            "Sub_12_out0": "/layers.3/sublayer.0/norm/Sub_output_0",
-            "Sub_14_out0": "/layers.3/sublayer.1/norm/Sub_output_0",
-            "Sub_16_out0": "/layers.4/sublayer.0/norm/Sub_output_0",
-            "Sub_18_out0": "/layers.4/sublayer.1/norm/Sub_output_0",
-            "Sub_20_out0": "/layers.5/sublayer.0/norm/Sub_output_0",
-            "Sub_22_out0": "/layers.5/sublayer.1/norm/Sub_output_0",
-            "Sub_24_out0": "/norm/Sub_output_0"
-        }
-    else:
-        fix_dictionary = {
-            "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
-            "Sub_2_out0": "/layers.0/sublayer.1/norm/Sub_output_0",
-            "Sub_4_out0": "/layers.0/sublayer.2/norm/Sub_output_0",
-            "Sub_6_out0": "/layers.1/sublayer.0/norm/Sub_output_0",
-            "Sub_8_out0": "/layers.1/sublayer.1/norm/Sub_output_0",
-            "Sub_10_out0": "/layers.1/sublayer.2/norm/Sub_output_0",
-            "Sub_12_out0": "/layers.2/sublayer.0/norm/Sub_output_0",
-            "Sub_14_out0": "/layers.2/sublayer.1/norm/Sub_output_0",
-            "Sub_16_out0": "/layers.2/sublayer.2/norm/Sub_output_0",
-            "Sub_18_out0": "/layers.3/sublayer.0/norm/Sub_output_0",
-            "Sub_20_out0": "/layers.3/sublayer.1/norm/Sub_output_0",
-            "Sub_22_out0": "/layers.3/sublayer.2/norm/Sub_output_0",
-            "Sub_24_out0": "/layers.4/sublayer.0/norm/Sub_output_0",
-            "Sub_26_out0": "/layers.4/sublayer.1/norm/Sub_output_0",
-            "Sub_28_out0": "/layers.4/sublayer.2/norm/Sub_output_0",
-            "Sub_30_out0": "/layers.5/sublayer.0/norm/Sub_output_0",
-            "Sub_32_out0": "/layers.5/sublayer.1/norm/Sub_output_0",
-            "Sub_34_out0": "/layers.5/sublayer.2/norm/Sub_output_0",
-            "Sub_36_out0": "/norm/Sub_output_0"
-        }
-        
+
+    fix_dictionary = {
+        "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
+        "Sub_2_out0": "/layers.0/sublayer.1/norm/Sub_output_0",
+        "Sub_4_out0": "/layers.1/sublayer.0/norm/Sub_output_0",
+        "Sub_6_out0": "/layers.1/sublayer.1/norm/Sub_output_0",
+        "Sub_8_out0": "/layers.2/sublayer.0/norm/Sub_output_0",
+        "Sub_10_out0": "/layers.2/sublayer.1/norm/Sub_output_0",
+        "Sub_12_out0": "/layers.3/sublayer.0/norm/Sub_output_0",
+        "Sub_14_out0": "/layers.3/sublayer.1/norm/Sub_output_0",
+        "Sub_16_out0": "/layers.4/sublayer.0/norm/Sub_output_0",
+        "Sub_18_out0": "/layers.4/sublayer.1/norm/Sub_output_0",
+        "Sub_20_out0": "/layers.5/sublayer.0/norm/Sub_output_0",
+        "Sub_22_out0": "/layers.5/sublayer.1/norm/Sub_output_0",
+        "Sub_24_out0": "/norm/Sub_output_0"
+    }
 
     if node.input[0] in fix_dictionary.keys():
         new_tensor = helper.ValueInfoProto()
@@ -71,7 +46,6 @@ def execute_node(node, main_graph, final_output_node, weight_dict):
     )
 
     model = ModelProto()
-    model = shape_inference.infer_shapes(model)
     model.graph.CopyFrom(graph)
     model.opset_import.append(OperatorSetIdProto(version=13))
     model = ModelWrapper(model)
@@ -101,7 +75,7 @@ def inference(main_graph, weight_dict):
         output_tensors, weight_dict = execute_single_node(node, weight_dict, main_graph)
     return output_tensors, weight_dict
 
-def expand_node_inputs_outputs(graph, node, weight_dict):
+def expand_node_inputs_outputs(graph, node):
     added_inputs = []
     added_outputs = []
 
@@ -111,27 +85,23 @@ def expand_node_inputs_outputs(graph, node, weight_dict):
     added_outputs += list(filter(lambda x: x.name in node.output, graph.output))
     added_outputs += list(filter(lambda x: x.name in node.output, graph.value_info))
 
-    replacement_dictionary = {
-        "onnx::ReduceMean_0_dynamic_axes_1": 1,
-        "onnx::Unsqueeze_3_dynamic_axes_1": 1,
-        "onnx::Unsqueeze_3_dynamic_axes_2": 1,
-    }
-
+    print("ADDED INPUTS:")
+    print(added_inputs[0].type.tensor_type.shape.dim[1])
+    print(added_inputs[0].type.tensor_type.shape.dim)
     for input_tensor in added_inputs:
-        for dimension in range(len(input_tensor.type.tensor_type.shape.dim)):
-            #print(input_tensor.type.tensor_type.shape.dim[dimension])
-            for key in replacement_dictionary.keys():
-                if key in str(input_tensor.type.tensor_type.shape.dim[dimension]):
-                    #print("FOUND")
-                    input_tensor.type.tensor_type.shape.dim[dimension].Clear()
-                    input_tensor.type.tensor_type.shape.dim[dimension].dim_value = replacement_dictionary[key]
-                if "unk__" in str(input_tensor.type.tensor_type.shape.dim[dimension]):
-                    #print(weight_dict[input_tensor.name].shape[dimension])
-                    input_tensor.type.tensor_type.shape.dim[dimension].Clear()
-                    input_tensor.type.tensor_type.shape.dim[dimension].dim_value = weight_dict[input_tensor.name].shape[dimension]
-                    #print(input_tensor)
-
-    return added_inputs, added_outputs
+        print(input_tensor)
+        print(len(input_tensor.type.tensor_type.shape.dim))
+    """
+    try:
+        if "onnx::ReduceMean_0_dynamic_axes_1" in (str(added_inputs[0].type.tensor_type.shape.dim[1])):
+            print("LENGTH:")
+            print(len(added_inputs[0].type.tensor_type.shape.dim))
+            print("END LENGTH")
+            added_inputs[0].type.tensor_type.shape.dim[1].Clear()
+            added_inputs[0].type.tensor_type.shape.dim[1].dim_value = 1
+    finally:
+        return added_inputs, added_outputs
+    """
 
 def get_weight_dict(module_path):
     module = ModelWrapper(module_path)

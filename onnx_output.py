@@ -618,15 +618,14 @@ def run_model_example(n_examples=5):
     return model, example_data
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
-    ort_sess_encoder = ort.InferenceSession('onnx/encoder.onnx')
+    ort_sess_encoder = ort.InferenceSession('encoder.onnx')
     src_float = model.get_src_embed(src)
     memory = torch.from_numpy(ort_sess_encoder.run(None, {"onnx::ReduceMean_0": src_float.detach().numpy(), "onnx::Unsqueeze_1": src_mask.detach().numpy()})[0])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
     for i in range(max_len - 1):
         ys_float = model.get_tgt_embed(ys)
-        ort_sess_decoder = ort.InferenceSession('onnx/decoder.onnx')
-        """
+        ort_sess_decoder = ort.InferenceSession('decoder.onnx')
         print("MEMORY:")
         print(memory.detach().numpy().dtype)
         print(memory.detach().numpy().shape)
@@ -643,7 +642,6 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         print("SUBSEQUENT MASK:")
         print(subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy().dtype)
         print(subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy().shape)
-        """
         out = torch.from_numpy(ort_sess_decoder.run(None,{ 
             "onnx::ReduceMean_0": ys_float.detach().numpy(),
             "x.3919": memory.detach().numpy(),
