@@ -4,7 +4,7 @@ from qonnx.core.onnx_exec import execute_onnx
 import onnx.numpy_helper as numpy_helper
 import numpy as np
 
-def execute_node(node, main_graph, final_output_node, weight_dict):
+def execute_node(node, main_graph, final_output_node, weight_dict, module):
     node_inputs = []
     node_outputs = []
 
@@ -15,7 +15,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict):
     desired_node_outputs = [x for x in node_outputs if x.name == final_output_node]
     intermediate_node_outputs = [x for x in node_outputs if x.name != final_output_node]
     
-    module = "decoder"
+    #module = "encoder"
     if module == "encoder":
         fix_dictionary = {
             "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
@@ -91,14 +91,14 @@ def execute_node(node, main_graph, final_output_node, weight_dict):
 
     return output_tensors, weight_dict
 
-def inference(main_graph, weight_dict):
-    def execute_single_node(node, weight_dict, main_graph):
+def inference(main_graph, weight_dict, module):
+    def execute_single_node(node, weight_dict, main_graph, module):
         final_output_node = node.output[0]
-        output_tensors, weight_dict = execute_node(node, main_graph, final_output_node, weight_dict)
+        output_tensors, weight_dict = execute_node(node, main_graph, final_output_node, weight_dict, module)
         return output_tensors, weight_dict
     output_tensors = None
     for node in main_graph.node:
-        output_tensors, weight_dict = execute_single_node(node, weight_dict, main_graph)
+        output_tensors, weight_dict = execute_single_node(node, weight_dict, main_graph, module)
     return output_tensors, weight_dict
 
 def expand_node_inputs_outputs(graph, node, weight_dict):
@@ -140,42 +140,43 @@ def get_weight_dict(module_path):
     module_weight_dict = {}
     for weight in module_weights:
         module_weight_dict[weight.name] = numpy_helper.to_array(weight)
-    return module, module_graph, module_weight_dict
+    return module_graph, module_weight_dict
 
+def prepare_inference(module_path, module_input_values):
+    module = ModelWrapper(module_path)
+    output = [node.name for node in module.graph.output]
+
+    input_all = [node.name for node in module.graph.input]
+    input_initializers = [node.name for node in module.graph.initializer]
+    module_input_names = list(set(input_all) - set(input_initializers))
+
+    module_graph, module_weight_dict = get_weight_dict(module_path)
+
+    for input_name in module_input_names:
+        module_weight_dict[input_name] = module_input_values[input_name]
+
+    return module_weight_dict, module_graph
 
 if __name__ == "__main__":
+
+    module = "encoder"
+    encoder_input_values = {
+        "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
+        "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
+    module_weight_dict, module_graph = prepare_inference("./onnx/encoder.onnx", encoder_input_values)
+    output_tensors, module_weight_dict = inference(module_graph, module_weight_dict, module)
+
+    print("ENCODER OUT:")
+    print(output_tensors)
+
     module = "decoder"
+    decoder_input_values = {
+        "global_in": np.random.rand(1, 1, 512).astype(np.float32), 
+        "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
+        "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
+        "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
+    module_weight_dict, module_graph = prepare_inference("./onnx/decoder.onnx", decoder_input_values)
+    output_tensors, module_weight_dict = inference(module_graph, module_weight_dict, module)
 
-    if module == "encoder":
-        input_1_name = "global_in"
-        input_2_name = "global_in_1"
-        encoder_filename = "./onnx/encoder.onnx"
-        encoder, encoder_graph, encoder_weight_dict = get_weight_dict(encoder_filename)
-
-        tensor_float32 = np.random.rand(1, 128, 512).astype(np.float32)
-        tensor_boolean = np.random.choice([True, False], size=(1, 1, 128))
-
-        encoder_weight_dict[input_1_name] = tensor_float32
-        encoder_weight_dict[input_2_name] = tensor_boolean
-        output_tensors, weight_dict = inference(encoder_graph, encoder_weight_dict)
-        print(output_tensors)
-
-    elif module == "decoder":
-        input_1_name = "global_in"
-        input_2_name = "global_in_1"
-        input_3_name = "global_in_2"
-        input_4_name = "global_in_3"
-        decoder_filename = "./onnx/decoder.onnx"
-        decoder, decoder_graph, decoder_weight_dict = get_weight_dict(decoder_filename)
-
-        tensor_float32_1 = np.random.rand(1, 1, 512).astype(np.float32)
-        tensor_float32_2 = np.random.rand(1, 128, 512).astype(np.float32)
-        tensor_boolean = np.random.choice([True, False], size=(1, 1, 128))
-        tensor_int32 = np.random.rand(1, 1, 1).astype(np.int64)
-
-        decoder_weight_dict[input_1_name] = tensor_float32_1
-        decoder_weight_dict[input_2_name] = tensor_float32_2
-        decoder_weight_dict[input_3_name] = tensor_boolean
-        decoder_weight_dict[input_4_name] = tensor_int32
-        output_tensors, weight_dict = inference(decoder_graph, decoder_weight_dict)
-        print(output_tensors)
+    print("DECODER OUT:")
+    print(output_tensors)
