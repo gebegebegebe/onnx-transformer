@@ -8,7 +8,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     node_inputs = []
     node_outputs = []
 
-    added_quant_inputs, added_quant_outputs = expand_node_inputs_outputs(main_graph, node, weight_dict)
+    added_quant_inputs, added_quant_outputs = expand_node_inputs_outputs(main_graph, node, weight_dict, module)
     node_inputs += added_quant_inputs
     node_outputs += added_quant_outputs
 
@@ -101,7 +101,7 @@ def inference(main_graph, weight_dict, module):
         output_tensors, weight_dict = execute_single_node(node, weight_dict, main_graph, module)
     return output_tensors, weight_dict
 
-def expand_node_inputs_outputs(graph, node, weight_dict):
+def expand_node_inputs_outputs(graph, node, weight_dict, module):
     added_inputs = []
     added_outputs = []
 
@@ -111,25 +111,25 @@ def expand_node_inputs_outputs(graph, node, weight_dict):
     added_outputs += list(filter(lambda x: x.name in node.output, graph.output))
     added_outputs += list(filter(lambda x: x.name in node.output, graph.value_info))
 
-    replacement_dictionary = {
-        "onnx::ReduceMean_0_dynamic_axes_1": 1,
-        "onnx::Unsqueeze_3_dynamic_axes_1": 1,
-        "onnx::Unsqueeze_3_dynamic_axes_2": 1,
-    }
+    if module == "decoder":
+        replacement_dictionary = {
+            "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
+            "onnx::Unsqueeze_3_dynamic_axes_1": weight_dict["global_in_3"].shape[1],
+            "onnx::Unsqueeze_3_dynamic_axes_2": weight_dict["global_in_3"].shape[2],
+        }
 
-    for input_tensor in added_inputs:
-        for dimension in range(len(input_tensor.type.tensor_type.shape.dim)):
-            #print(input_tensor.type.tensor_type.shape.dim[dimension])
-            for key in replacement_dictionary.keys():
-                if key in str(input_tensor.type.tensor_type.shape.dim[dimension]):
-                    #print("FOUND")
-                    input_tensor.type.tensor_type.shape.dim[dimension].Clear()
-                    input_tensor.type.tensor_type.shape.dim[dimension].dim_value = replacement_dictionary[key]
-                if "unk__" in str(input_tensor.type.tensor_type.shape.dim[dimension]):
-                    #print(weight_dict[input_tensor.name].shape[dimension])
-                    input_tensor.type.tensor_type.shape.dim[dimension].Clear()
-                    input_tensor.type.tensor_type.shape.dim[dimension].dim_value = weight_dict[input_tensor.name].shape[dimension]
-                    #print(input_tensor)
+        for input_tensor in added_inputs:
+            for dimension in range(len(input_tensor.type.tensor_type.shape.dim)):
+                #print(input_tensor.type.tensor_type.shape.dim[dimension])
+                for key in replacement_dictionary.keys():
+                    if key in str(input_tensor.type.tensor_type.shape.dim[dimension]):
+                        input_tensor.type.tensor_type.shape.dim[dimension].Clear()
+                        input_tensor.type.tensor_type.shape.dim[dimension].dim_value = replacement_dictionary[key]
+                    if "unk__" in str(input_tensor.type.tensor_type.shape.dim[dimension]):
+                        #print(weight_dict[input_tensor.name].shape[dimension])
+                        input_tensor.type.tensor_type.shape.dim[dimension].Clear()
+                        input_tensor.type.tensor_type.shape.dim[dimension].dim_value = weight_dict[input_tensor.name].shape[dimension]
+                        #print(input_tensor)
 
     return added_inputs, added_outputs
 
@@ -157,14 +157,18 @@ def prepare_inference(module_path, module_input_values):
 
     return module_weight_dict, module_graph
 
+def run_module(module, input_values, module_filepath):
+    module_weight_dict, module_graph = prepare_inference(module_filepath, input_values)
+    return inference(module_graph, module_weight_dict, module)
+
 if __name__ == "__main__":
 
     module = "encoder"
     encoder_input_values = {
         "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
-    module_weight_dict, module_graph = prepare_inference("./onnx/encoder.onnx", encoder_input_values)
-    output_tensors, module_weight_dict = inference(module_graph, module_weight_dict, module)
+    module_filepath = "./onnx/encoder.onnx"
+    output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
 
     print("ENCODER OUT:")
     print(output_tensors)
@@ -175,8 +179,8 @@ if __name__ == "__main__":
         "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
         "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
-    module_weight_dict, module_graph = prepare_inference("./onnx/decoder.onnx", decoder_input_values)
-    output_tensors, module_weight_dict = inference(module_graph, module_weight_dict, module)
+    module_filepath = "./onnx/decoder.onnx"
+    output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
 
     print("DECODER OUT:")
     print(output_tensors)
