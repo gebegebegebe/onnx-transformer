@@ -565,6 +565,7 @@ def check_outputs(
 
         reference_text.append([output_target])
         output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
+        print(output_list)
         end_index = (output_list.index("</s>"))
         output_list = output_list[1:end_index]
         output_string = (" ".join(output_list))
@@ -612,24 +613,31 @@ def run_model_example(run_module_component="encoder", n_examples=5):
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol, module_component):
     src_float = model.get_src_embed(src)
-    if module_component == "encoder":
-        memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/encoder.onnx")
-        memory = torch.from_numpy(memory[list(memory.keys())[0]])
-    else:
-        ort_sess_encoder = ort.InferenceSession('./onnx/encoder.onnx')
-        memory = torch.from_numpy(ort_sess_encoder.run(None, {"onnx::ReduceMean_0": src_float.detach().numpy(), "onnx::Unsqueeze_1": src_mask.detach().numpy()})[0])
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/fixed/encoder_fixed.onnx")
+    memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
+    print("DECODER:")
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
-        out, _ = run_module("decoder", {
-            "global_in": ys_float.detach().numpy(),
-            "global_in_1": memory.detach().numpy(),
-            "global_in_2": src_mask.detach().numpy(),
-            "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-        }, "./onnx/decoder.onnx")
-        out = torch.from_numpy(out[list(out.keys())[0]])
+        if module_component == "decoder":
+            out, _ = run_module("decoder", {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            }, "./onnx/fixed/decoder_fixed.onnx")
+            out = torch.from_numpy(out[list(out.keys())[0]])
+        else:
+            ort_sess_decoder = ort.InferenceSession('./onnx/fixed/decoder_fixed.onnx')
+            out = torch.from_numpy(ort_sess_decoder.run(None,{
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            })[0])
+
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
@@ -669,5 +677,5 @@ def load_trained_model(module_component):
 
 
 if is_interactive_notebook():
-    module_component = "decoder"
+    module_component = "encoder"
     model = load_trained_model(module_component)

@@ -73,16 +73,13 @@ def expand_node_inputs_outputs(graph, node, weight_dict, module):
 
         for input_tensor in added_inputs:
             for dimension in range(len(input_tensor.type.tensor_type.shape.dim)):
-                #print(input_tensor.type.tensor_type.shape.dim[dimension])
                 for key in replacement_dictionary.keys():
                     if key in str(input_tensor.type.tensor_type.shape.dim[dimension]):
                         input_tensor.type.tensor_type.shape.dim[dimension].Clear()
                         input_tensor.type.tensor_type.shape.dim[dimension].dim_value = replacement_dictionary[key]
                     if "unk__" in str(input_tensor.type.tensor_type.shape.dim[dimension]):
-                        #print(weight_dict[input_tensor.name].shape[dimension])
                         input_tensor.type.tensor_type.shape.dim[dimension].Clear()
                         input_tensor.type.tensor_type.shape.dim[dimension].dim_value = weight_dict[input_tensor.name].shape[dimension]
-                        #print(input_tensor)
 
     return added_inputs, added_outputs
 
@@ -120,12 +117,11 @@ if __name__ == "__main__":
     encoder_input_values = {
         "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
-    module_filepath = "./onnx/encoder.onnx"
+    module_filepath = "./onnx/fixed/encoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
 
     print("ENCODER OUT:")
     print(output_tensors)
-    torch.save(module_weight_dict, "encoder_weight_dict.pt")
 
     module = "decoder"
     decoder_input_values = {
@@ -133,9 +129,8 @@ if __name__ == "__main__":
         "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
         "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
-    module_filepath = "./onnx/decoder.onnx"
+    module_filepath = "./onnx/fixed/decoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
 
     print("DECODER OUT:")
     print(output_tensors)
-    torch.save(module_weight_dict, "decoder_weight_dict.pt")
