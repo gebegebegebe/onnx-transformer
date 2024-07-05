@@ -3,6 +3,7 @@ from qonnx.core.modelwrapper import ModelWrapper
 from qonnx.core.onnx_exec import execute_onnx
 import onnx.numpy_helper as numpy_helper
 import numpy as np
+import torch
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module):
     node_inputs = []
@@ -15,54 +16,6 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     desired_node_outputs = [x for x in node_outputs if x.name == final_output_node]
     intermediate_node_outputs = [x for x in node_outputs if x.name != final_output_node]
     
-    #module = "encoder"
-    if module == "encoder":
-        fix_dictionary = {
-            "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
-            "Sub_2_out0": "/layers.0/sublayer.1/norm/Sub_output_0",
-            "Sub_4_out0": "/layers.1/sublayer.0/norm/Sub_output_0",
-            "Sub_6_out0": "/layers.1/sublayer.1/norm/Sub_output_0",
-            "Sub_8_out0": "/layers.2/sublayer.0/norm/Sub_output_0",
-            "Sub_10_out0": "/layers.2/sublayer.1/norm/Sub_output_0",
-            "Sub_12_out0": "/layers.3/sublayer.0/norm/Sub_output_0",
-            "Sub_14_out0": "/layers.3/sublayer.1/norm/Sub_output_0",
-            "Sub_16_out0": "/layers.4/sublayer.0/norm/Sub_output_0",
-            "Sub_18_out0": "/layers.4/sublayer.1/norm/Sub_output_0",
-            "Sub_20_out0": "/layers.5/sublayer.0/norm/Sub_output_0",
-            "Sub_22_out0": "/layers.5/sublayer.1/norm/Sub_output_0",
-            "Sub_24_out0": "/norm/Sub_output_0"
-        }
-    else:
-        fix_dictionary = {
-            "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
-            "Sub_2_out0": "/layers.0/sublayer.1/norm/Sub_output_0",
-            "Sub_4_out0": "/layers.0/sublayer.2/norm/Sub_output_0",
-            "Sub_6_out0": "/layers.1/sublayer.0/norm/Sub_output_0",
-            "Sub_8_out0": "/layers.1/sublayer.1/norm/Sub_output_0",
-            "Sub_10_out0": "/layers.1/sublayer.2/norm/Sub_output_0",
-            "Sub_12_out0": "/layers.2/sublayer.0/norm/Sub_output_0",
-            "Sub_14_out0": "/layers.2/sublayer.1/norm/Sub_output_0",
-            "Sub_16_out0": "/layers.2/sublayer.2/norm/Sub_output_0",
-            "Sub_18_out0": "/layers.3/sublayer.0/norm/Sub_output_0",
-            "Sub_20_out0": "/layers.3/sublayer.1/norm/Sub_output_0",
-            "Sub_22_out0": "/layers.3/sublayer.2/norm/Sub_output_0",
-            "Sub_24_out0": "/layers.4/sublayer.0/norm/Sub_output_0",
-            "Sub_26_out0": "/layers.4/sublayer.1/norm/Sub_output_0",
-            "Sub_28_out0": "/layers.4/sublayer.2/norm/Sub_output_0",
-            "Sub_30_out0": "/layers.5/sublayer.0/norm/Sub_output_0",
-            "Sub_32_out0": "/layers.5/sublayer.1/norm/Sub_output_0",
-            "Sub_34_out0": "/layers.5/sublayer.2/norm/Sub_output_0",
-            "Sub_36_out0": "/norm/Sub_output_0"
-        }
-        
-
-    if node.input[0] in fix_dictionary.keys():
-        new_tensor = helper.ValueInfoProto()
-        new_tensor.CopyFrom(node_inputs[0])
-        new_tensor.name = fix_dictionary[node.input[0]]
-        node_inputs.append(new_tensor)
-        weight_dict[new_tensor.name] = weight_dict[node_inputs[0].name]
-
     graph = helper.make_graph(
             nodes = [node],
             name = "single_node_exec",
@@ -172,6 +125,7 @@ if __name__ == "__main__":
 
     print("ENCODER OUT:")
     print(output_tensors)
+    torch.save(module_weight_dict, "encoder_weight_dict.pt")
 
     module = "decoder"
     decoder_input_values = {
@@ -184,3 +138,4 @@ if __name__ == "__main__":
 
     print("DECODER OUT:")
     print(output_tensors)
+    torch.save(module_weight_dict, "decoder_weight_dict.pt")

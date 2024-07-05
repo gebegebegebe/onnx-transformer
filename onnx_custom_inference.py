@@ -622,7 +622,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
     src_float = model.get_src_embed(src)
     #memory = torch.from_numpy(ort_sess_encoder.run(None, {"onnx::ReduceMean_0": src_float.detach().numpy(), "onnx::Unsqueeze_1": src_mask.detach().numpy()})[0])
 
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/encoder.onnx")
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/fixed/encoder_fixed.onnx")
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -634,7 +634,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
             "global_in_1": memory.detach().numpy(),
             "global_in_2": src_mask.detach().numpy(),
             "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-        }, "./onnx/decoder.onnx")
+        }, "./onnx/fixed/decoder_fixed.onnx")
         out = torch.from_numpy(out[list(out.keys())[0]])
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
