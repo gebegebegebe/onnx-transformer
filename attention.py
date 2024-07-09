@@ -32,7 +32,8 @@ class MultiHeadedAttention(nn.Module):
         self.linears = clones(qnn.QuantLinear(d_model, d_model, bit_width=bit_width, weight_bit_width=bit_width, bias=True, quant_bias=Int32Bias), 4)
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
-        self.quantizer = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=False)
+        self.quantizer_1 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=False)
+        self.quantizer_2 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=False)
         
     def forward(self, query, key, value, mask=None):
         "Implements Figure 2"
@@ -43,7 +44,7 @@ class MultiHeadedAttention(nn.Module):
         
         # 1) Do all the linear projections in batch from d_model => h x d_k 
         query, key, value = \
-            [l(self.quantizer(x)).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+            [l(self.quantizer_1(x)).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              for l, x in zip(self.linears, (query, key, value))]
         
         # 2) Apply attention on all the projected vectors in batch. 
@@ -53,4 +54,4 @@ class MultiHeadedAttention(nn.Module):
         # 3) "Concat" using a view and apply a final linear. 
         x = x.transpose(1, 2).contiguous() \
              .view(nbatches, -1, self.h * self.d_k)
-        return self.linears[-1](x)
+        return self.linears[-1](self.quantizer_2(x))

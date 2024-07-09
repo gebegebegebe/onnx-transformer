@@ -109,6 +109,7 @@ def prepare_inference(module_path, module_input_values):
 
 def run_module(module, input_values, module_filepath):
     module_weight_dict, module_graph = prepare_inference(module_filepath, input_values)
+    torch.save((module_weight_dict, module_graph), (module + ".pt"))
     return inference(module_graph, module_weight_dict, module)
 
 if __name__ == "__main__":
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     encoder_input_values = {
         "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
-    module_filepath = "./onnx/fixed/encoder_fixed.onnx"
+    module_filepath = "./onnx/new_fixed/encoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
 
     print("ENCODER OUT:")
@@ -129,7 +130,7 @@ if __name__ == "__main__":
         "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
         "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
-    module_filepath = "./onnx/fixed/decoder_fixed.onnx"
+    module_filepath = "./onnx/new_fixed/decoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
 
     print("DECODER OUT:")

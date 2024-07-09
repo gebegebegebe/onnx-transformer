@@ -11,7 +11,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     node_inputs = []
     node_outputs = []
 
-    added_quant_inputs, added_quant_outputs = expand_node_inputs_outputs(main_graph, node, weight_dict, module)
+    added_quant_inputs, added_quant_outputs, list_operation_time = expand_node_inputs_outputs(main_graph, node, weight_dict, module)
     node_inputs += added_quant_inputs
     node_outputs += added_quant_outputs
 
@@ -45,16 +45,17 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
-    return output_tensors, weight_dict
+    return output_tensors, weight_dict, list_operation_time
 
 def inference(main_graph, weight_dict, module):
     def execute_single_node(node, weight_dict, main_graph, module):
         final_output_node = node.output[0]
-        output_tensors, weight_dict = execute_node(node, main_graph, final_output_node, weight_dict, module)
-        return output_tensors, weight_dict
+        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module)
+        return output_tensors, weight_dict, list_operation_time
     output_tensors = None
     for node in main_graph.node:
-        output_tensors, weight_dict = execute_single_node(node, weight_dict, main_graph, module)
+        start_time = time.time()
+        output_tensors, weight_dict, list_operation_time = execute_single_node(node, weight_dict, main_graph, module)
     return output_tensors, weight_dict
 
 def expand_node_inputs_outputs(graph, node, weight_dict, module):
@@ -67,6 +68,7 @@ def expand_node_inputs_outputs(graph, node, weight_dict, module):
     added_outputs += list(filter(lambda x: x.name in node.output, graph.output))
     added_outputs += list(filter(lambda x: x.name in node.output, graph.value_info))
 
+    start_time = time.time()
     if module == "decoder":
         replacement_dictionary = {
             "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
@@ -84,7 +86,7 @@ def expand_node_inputs_outputs(graph, node, weight_dict, module):
                         input_tensor.type.tensor_type.shape.dim[dimension].Clear()
                         input_tensor.type.tensor_type.shape.dim[dimension].dim_value = weight_dict[input_tensor.name].shape[dimension]
 
-    return added_inputs, added_outputs
+    return added_inputs, added_outputs, time.time() - start_time
 
 def get_weight_dict(module_path):
     module = ModelWrapper(module_path)
@@ -125,8 +127,9 @@ if __name__ == "__main__":
     encoder_input_values = {
         "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
-    module_filepath = "./onnx/fixed/encoder_fixed.onnx"
+    module_filepath = "./onnx/new_fixed/encoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
+    torch.save(module_weight_dict, "encoder.pt")
 
     print("ENCODER OUT:")
     print(output_tensors)
@@ -137,9 +140,10 @@ if __name__ == "__main__":
         "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
         "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
         "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
-    module_filepath = "./onnx/fixed/decoder_fixed.onnx"
+    module_filepath = "./onnx/new_fixed/decoder_fixed.onnx"
 
     output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
+    torch.save(module_weight_dict, "decoder.pt")
 
     print("DECODER OUT:")
     print(output_tensors)

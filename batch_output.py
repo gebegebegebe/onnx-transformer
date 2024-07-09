@@ -610,7 +610,7 @@ def run_model_example(n_examples=5):
         vocab_tgt,
         spacy_de,
         spacy_en,
-        batch_size=32,
+        batch_size=128,
         is_distributed=False,
     )
 

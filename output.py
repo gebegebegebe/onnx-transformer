@@ -618,6 +618,7 @@ def run_model_example(n_examples=5):
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
     memory = model.encode(src, src_mask)
+    model.export_encoder(src, src_mask, "encoder_try.onnx")
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
     for i in range(max_len - 1):
         print("--")

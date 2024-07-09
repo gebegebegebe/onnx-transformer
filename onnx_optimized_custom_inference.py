@@ -625,7 +625,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
     src_float = model.get_src_embed(src)
     encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph)
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -642,15 +642,17 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
         start_time = time.time()
         if custom_decoder:
+            current_decoder_graph = copy.deepcopy(decoder_graph)
             out, _ = run_module("decoder", {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-            }, "./onnx/fixed/decoder_fixed.onnx", decoder_weight_dict, copy.deepcopy(decoder_graph))
+            }, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph)
             out = torch.from_numpy(out[list(out.keys())[0]])
+            del current_decoder_graph
         else:
-            ort_sess_decoder = ort.InferenceSession('./onnx/fixed/decoder_fixed.onnx')
+            ort_sess_decoder = ort.InferenceSession('./onnx/new_fixed/decoder_fixed.onnx')
             out = torch.from_numpy(ort_sess_decoder.run(None, {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
