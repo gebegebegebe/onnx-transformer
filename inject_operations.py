@@ -7,7 +7,7 @@ import torch
 
 import time
 
-def execute_node(node, main_graph, final_output_node, weight_dict, module):
+def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input):
     node_inputs = []
     node_outputs = []
 
@@ -47,15 +47,14 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
 
     return output_tensors, weight_dict, list_operation_time
 
-def inference(main_graph, weight_dict, module):
-    def execute_single_node(node, weight_dict, main_graph, module):
+def inference(main_graph, weight_dict, module, inject_input):
+    def execute_single_node(node, weight_dict, main_graph, module, inject_input):
         final_output_node = node.output[0]
-        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module)
+        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input)
         return output_tensors, weight_dict, list_operation_time
     output_tensors = None
     for node in main_graph.node:
-        start_time = time.time()
-        output_tensors, weight_dict, list_operation_time = execute_single_node(node, weight_dict, main_graph, module)
+        output_tensors, weight_dict, list_operation_time = execute_single_node(node, weight_dict, main_graph, module, inject_input)
     return output_tensors, weight_dict
 
 def expand_node_inputs_outputs(graph, node, weight_dict, module):
@@ -112,14 +111,13 @@ def prepare_inference(module_path, module_input_values):
 
     return module_weight_dict, module_graph
 
-def run_module(module, input_values, module_filepath, module_weight_dict, module_graph):
-    #module_weight_dict, module_graph = prepare_inference(module_filepath, input_values)
+def run_module(module, input_values, module_filepath, module_weight_dict, module_graph, inject_input):
     start_time = time.time()
     for input_name in list(input_values.keys()):
         module_weight_dict[input_name] = input_values[input_name]
     print("LOAD TIME: " + str(time.time() - start_time))
 
-    return inference(module_graph, module_weight_dict, module)
+    return inference(module_graph, module_weight_dict, module, inject_input)
 
 if __name__ == "__main__":
 

@@ -26,22 +26,21 @@ import nltk
 import onnxruntime as ort
 ort.set_default_logger_severity(3)
 import numpy as np
-#from onnx_inference_legacy import run_module
-#from onnx_optimized_inference import run_module
 from inject_operations import run_module
-#from onnx_inference import run_module
 import copy
 
-# Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
 RUN_EXAMPLES = True
-# Some convenience helper functions used throughout the notebook
+
+import argparse
+parser = argparse.ArgumentParser('Fault Injection Program')
+parser.add_argument('--directory_name')
+args = parser.parse_args()
+import json
 
 
 def tokenize(text):
-    #return [tok.text for tok in tokenizer.tokenizer(text)]
     temp = text.split(" ")
-    #print(temp)
     return temp
 
 
@@ -200,13 +199,13 @@ def create_dataloaders(
     )
     return train_dataloader, valid_dataloader
 
-# Batas suci
 
 def check_outputs(
     valid_dataloader,
     model,
     vocab_src,
     vocab_tgt,
+    inject_input,
     n_examples=15,
     pad_idx=2,
     eos_string="</s>",
@@ -221,7 +220,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
+        greedy_decode(model, rb.src, rb.src_mask, 64, 0, inject_input, False)[0]
 
         src_tokens = [
             vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
@@ -238,7 +237,7 @@ def check_outputs(
             "Target Text (Ground Truth) : "
             + " ".join(tgt_tokens).replace("\n", "")
         )
-        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
+        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_input, True)[0]
         model_txt = (
             " ".join(
                 [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
@@ -283,7 +282,7 @@ def check_outputs(
     return results
 
 
-def run_model_example(model_path, n_examples=5):
+def run_model_example(model_path, inject_input, n_examples=5):
     vocab_src, vocab_tgt = load_vocab()
 
     print("Preparing Data ...")
@@ -304,15 +303,15 @@ def run_model_example(model_path, n_examples=5):
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
-        valid_dataloader, model, vocab_src, vocab_tgt, n_examples=n_examples
+        valid_dataloader, model, vocab_src, vocab_tgt, inject_input, n_examples=n_examples
     )
     return model, example_data
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False):
 
+def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_input, custom_decoder=False):
     src_float = model.get_src_embed(src)
     encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph)
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, inject_input)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -332,7 +331,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         }
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
-            out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph)
+            out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, inject_input)
             out = torch.from_numpy(out[list(out.keys())[0]])
             del current_decoder_graph
         else:
@@ -349,6 +348,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
     return ys
 
+
 def subsequent_mask(size):
     "Mask out subsequent positions."
     attn_shape = (1, size, size)
@@ -357,20 +357,16 @@ def subsequent_mask(size):
     )
     return subsequent_mask == 0
 
+
 def load_trained_model():
-    config = {
-        "batch_size": 32,
-        "distributed": False,
-        "num_epochs": 8,
-        "accum_iter": 10,
-        "base_lr": 1.0,
-        "max_padding": 72,
-        "warmup": 3000,
-        "file_prefix": "multi30k_model_",
-    }
-    #model_path = "multi30k_model_final.pt"
     model_path = "checkpoint/iwslt14_model_00.pt"
-    run_model_example(model_path)
+
+    directory_name = str(args.directory_name)
+    directory_list = os.listdir(directory_name)
+
+    for layer in directory_list:
+        input_inject_data = json.load(open(directory_name + "/" + layer))
+        run_model_example(model_path, input_inject_data)
 
 
 if __name__ == "__main__":

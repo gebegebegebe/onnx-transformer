@@ -1,0 +1,8 @@
+{
+	"target_layer"		: "Conv_9",
+	"input_tensor"		: "DequantizeLinear_103_out0",
+	"weight_tensor"		: "DequantizeLinear_55_out0",
+	"bias_tensor"		: "DequantizeLinear_7_out0",
+	"output_tensor"		: "Conv_9_out0",
+	"model_name"		: "./assets/models/resnet50_w4a4.onnx"
+}
