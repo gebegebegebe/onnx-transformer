@@ -111,11 +111,12 @@ def prepare_inference(module_path, module_input_values):
 
     return module_weight_dict, module_graph
 
-def run_module(module, input_values, module_filepath, module_weight_dict, module_graph, inject_input):
-    start_time = time.time()
+def run_module(module, input_values, module_filepath, module_weight_dict, module_graph, inject_input=None):
+    if inject_input:
+        print("WILL INJECT!")
+        print(module)
     for input_name in list(input_values.keys()):
         module_weight_dict[input_name] = input_values[input_name]
-    print("LOAD TIME: " + str(time.time() - start_time))
 
     return inference(module_graph, module_weight_dict, module, inject_input)
 

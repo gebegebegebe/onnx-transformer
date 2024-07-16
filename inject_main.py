@@ -35,6 +35,7 @@ RUN_EXAMPLES = True
 import argparse
 parser = argparse.ArgumentParser('Fault Injection Program')
 parser.add_argument('--directory_name')
+parser.add_argument('--module')
 args = parser.parse_args()
 import json
 
@@ -277,7 +278,7 @@ def check_outputs(
 
         #TODO Model Output Text (Faulty)
 
-        model_out_faulty = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_parameters, False, True)[0]
+        model_out_faulty = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_parameters, True, True)[0]
         model_txt_faulty = (
             " ".join(
                 [vocab_tgt.get_itos()[x] for x in model_out_faulty if x != pad_idx]
@@ -338,17 +339,20 @@ def run_model_example(model_path, inject_parameters, n_examples=5):
 def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_parameters, custom_decoder=False, inject_fault=False):
     src_float = model.get_src_embed(src)
     encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
-    memory = torch.from_numpy(memory[list(memory.keys())[0]])
-    ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+    if inject_parameters["targetted_module"] == "encoder" and inject_fault:
+        memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
+        memory = torch.from_numpy(memory[list(memory.keys())[0]])
+        ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+    else:
+        memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, None)
+        memory = torch.from_numpy(memory[list(memory.keys())[0]])
+        ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
-    import time
     decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
-        start_time = time.time()
 
         input_data = {
             "global_in": ys_float.detach().numpy(),
@@ -357,14 +361,19 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_parameters
             "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
         }
         if custom_decoder:
-            current_decoder_graph = copy.deepcopy(decoder_graph)
-            out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, inject_paramaters)
-            out = torch.from_numpy(out[list(out.keys())[0]])
-            del current_decoder_graph
+            if inject_parameters["targetted_module"]=="decoder" and inject_fault:
+                current_decoder_graph = copy.deepcopy(decoder_graph)
+                out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, inject_parameters)
+                out = torch.from_numpy(out[list(out.keys())[0]])
+                del current_decoder_graph
+            else:
+                current_decoder_graph = copy.deepcopy(decoder_graph)
+                out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, None)
+                out = torch.from_numpy(out[list(out.keys())[0]])
+                del current_decoder_graph
         else:
             ort_sess_decoder = ort.InferenceSession('./onnx/new_fixed/decoder_fixed.onnx')
             out = torch.from_numpy(ort_sess_decoder.run(None, input_data)[0])
-        print(time.time() - start_time)
 
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
@@ -388,6 +397,7 @@ def subsequent_mask(size):
 def load_trained_model():
     model_path = "checkpoint/iwslt14_model_00.pt"
 
+    module = str(args.module)
     directory_name = str(args.directory_name)
     directory_list = os.listdir(directory_name)
     bit_width = 4
@@ -425,6 +435,7 @@ def load_trained_model():
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name 
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
+                inject_parameters["targetted_module"] = module 
                 run_model_example(model_path, inject_parameters, 1)
 
                 #print(inject_parameters)
