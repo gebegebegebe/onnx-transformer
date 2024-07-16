@@ -38,6 +38,10 @@ parser.add_argument('--directory_name')
 args = parser.parse_args()
 import json
 
+from inject_utils.layers import *
+from inject_utils.utils import *
+from qonnx.core.modelwrapper import ModelWrapper
+
 
 def tokenize(text):
     temp = text.split(" ")
@@ -363,10 +367,48 @@ def load_trained_model():
 
     directory_name = str(args.directory_name)
     directory_list = os.listdir(directory_name)
+    bit_width = 4
+
+    weight_dict, main_graph = torch.load("weights/encoder.pt")
 
     for layer in directory_list:
-        input_inject_data = json.load(open(directory_name + "/" + layer))
-        run_model_example(model_path, input_inject_data)
+        for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+            for bit_position in range(4):
+                input_inject_data = json.load(open(directory_name + "/" + layer))
+                faulty_bit_position = None
+                if "RANDOM" not in fault_model:
+                    faulty_bit_position = int(bit_position)
+                (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _ = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
+                original_weight_dict = weight_dict.copy()
+
+                faulty_quantizer_name = None
+                faulty_tensor_name = None 
+                if "INPUT" in fault_model:
+                    faulty_quantizer_name = input_quantizer_name
+                    faulty_tensor_name = int_input_tensor_name
+                elif "WEIGHT" in fault_model:
+                    faulty_quantizer_name = weight_quantizer_name
+                    faulty_tensor_name = int_weight_tensor_name
+                elif "RANDOM" in fault_model:
+                    faulty_quantizer_name = None
+                    faulty_tensor_name = output_tensor_name
+
+                #Injection parameters:
+                inject_parameters = {}
+                inject_parameters["original_weight_dict"] = original_weight_dict
+                inject_parameters["main_graph"] = copy.deepcopy(main_graph)
+                inject_parameters["inject_type"] = fault_model
+                inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
+                inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name 
+                inject_parameters["faulty_bit_position"] = faulty_bit_position
+                inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
+
+                print(inject_parameters)
+                exit()
+
+                
+
+        #run_model_example(model_path, input_inject_data)
 
 
 if __name__ == "__main__":
