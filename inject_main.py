@@ -259,20 +259,47 @@ def check_outputs(
             ).split(eos_string, 1)[0]
             + eos_string
         )
+
+        # Target Text
+
         output_target = clean_text_output(tgt_tokens)
         if output_target is None:
             continue
         reference_text.append([output_target])
+
+        # Model Output Text (Fault-Free)
+
         output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
         output_list = clean_text_output(output_list)
         if output_list is None:
             continue
         output_text.append(output_list)
-        #print("Model Output               : " + model_txt.replace("\n", ""))
+
+        #TODO Model Output Text (Faulty)
+
+        model_out_faulty = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_parameters, False, True)[0]
+        model_txt_faulty = (
+            " ".join(
+                [vocab_tgt.get_itos()[x] for x in model_out_faulty if x != pad_idx]
+            ).split(eos_string, 1)[0]
+            + eos_string
+        )
+
+        output_list_faulty = [vocab_tgt.get_itos()[x] for x in model_out_faulty if x != pad_idx]
+        output_list_faulty = clean_text_output(output_list_faulty)
+
+        #TODO fix this base case:
+        if output_list_faulty is None:
+            continue
+
+        # Print out everything else
+
         print("TARGET:")
         print(output_target)
         print("MODEL OUTPUT:")
         print(output_list)
+        print("MODEL OUTPUT FAULTY:")
+        print(output_list_faulty)
         print("SENTENCE BLEU:")
         print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list))
         results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
