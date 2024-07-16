@@ -8,8 +8,6 @@ import torch
 import time
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input):
-    print(inject_input)
-    exit()
     node_inputs = []
     node_outputs = []
 

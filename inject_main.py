@@ -203,13 +203,24 @@ def create_dataloaders(
     )
     return train_dataloader, valid_dataloader
 
+def clean_text_output(string_list):
+    if "</s>" not in string_list:
+        return None
+    string_list = (" ".join(string_list))
+    string_list = string_list.replace("@@ ", "")
+    string_list = string_list.replace("<s> ", "")
+    string_list = string_list.replace(" &apos;", "'")
+    string_list = string_list.split(" ")
+    end_index = (string_list.index("</s>"))
+    string_list = string_list[:end_index]
+    return string_list
 
 def check_outputs(
     valid_dataloader,
     model,
     vocab_src,
     vocab_tgt,
-    inject_input,
+    inject_parameters,
     n_examples=15,
     pad_idx=2,
     eos_string="</s>",
@@ -224,7 +235,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        greedy_decode(model, rb.src, rb.src_mask, 64, 0, inject_input, False)[0]
+        greedy_decode(model, rb.src, rb.src_mask, 64, 0, inject_parameters, False, False)[0]
 
         src_tokens = [
             vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
@@ -241,52 +252,37 @@ def check_outputs(
             "Target Text (Ground Truth) : "
             + " ".join(tgt_tokens).replace("\n", "")
         )
-        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_input, True)[0]
+        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, inject_parameters, False, False)[0]
         model_txt = (
             " ".join(
                 [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
             ).split(eos_string, 1)[0]
             + eos_string
         )
-        tgt_tokens = " ".join(tgt_tokens).replace("\n", "")
-        print("LIST:")
-        output_target = tgt_tokens
-        output_target = output_target.replace("@@ ","")
-        output_target = output_target.replace("<s> ","")
-        output_target = output_target.replace("</s>","")
-        output_target = output_target.replace(" &apos;","'")
-        output_target = output_target.split(" ")
-        output_target = output_target[:-1]
-
-        print(output_target)
+        output_target = clean_text_output(tgt_tokens)
+        if output_target is None:
+            continue
         reference_text.append([output_target])
-        print("LIST:")
         output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
-        end_index = (output_list.index("</s>"))
-        output_list = output_list[1:end_index]
-        output_string = (" ".join(output_list))
-        output_string = output_string.replace("@@ ", "")
-        output_string = output_string.replace("<s> ", "")
-        output_string = output_string.replace("</s>", "")
-        output_string = output_string.replace(" &apos;", "'")
-        output_list = output_string.split(" ")
-        print(output_list)
+        output_list = clean_text_output(output_list)
+        if output_list is None:
+            continue
         output_text.append(output_list)
-        """
-        model_txt = model_txt.replace("@@ ", "")
-        model_txt = model_txt.replace("<s> ", "")
-        model_txt = model_txt.replace("</s>", "")
-        model_txt = model_txt.replace(" &apos;", "'")
-        """
-        print("Model Output               : " + model_txt.replace("\n", ""))
+        #print("Model Output               : " + model_txt.replace("\n", ""))
+        print("TARGET:")
+        print(output_target)
+        print("MODEL OUTPUT:")
+        print(output_list)
+        print("SENTENCE BLEU:")
         print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list))
         results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
     print("CORPUS BLEU:")
-    print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
-    return results
+    bleu_score = (nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
+    print(bleu_score)
+    return bleu_score 
 
 
-def run_model_example(model_path, inject_input, n_examples=5):
+def run_model_example(model_path, inject_parameters, n_examples=5):
     vocab_src, vocab_tgt = load_vocab()
 
     print("Preparing Data ...")
@@ -307,15 +303,15 @@ def run_model_example(model_path, inject_input, n_examples=5):
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
-        valid_dataloader, model, vocab_src, vocab_tgt, inject_input, n_examples=n_examples
+        valid_dataloader, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
     )
     return model, example_data
 
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_input, custom_decoder=False):
+def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_parameters, custom_decoder=False, inject_fault=False):
     src_float = model.get_src_embed(src)
     encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, inject_input)
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./onnx/new_fixed/encoder_fixed.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -335,7 +331,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, inject_input, cus
         }
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
-            out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, inject_input)
+            out, _ = run_module("decoder", input_data, "./onnx/new_fixed/decoder_fixed.onnx", decoder_weight_dict, current_decoder_graph, inject_paramaters)
             out = torch.from_numpy(out[list(out.keys())[0]])
             del current_decoder_graph
         else:
@@ -402,8 +398,9 @@ def load_trained_model():
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name 
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
+                run_model_example(model_path, inject_parameters, 1)
 
-                print(inject_parameters)
+                #print(inject_parameters)
                 exit()
 
                 
