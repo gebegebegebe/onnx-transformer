@@ -5,8 +5,7 @@ import onnx.numpy_helper as numpy_helper
 import numpy as np
 import torch
 from inject_utils.utils import *
-from inject_utils.layers import perturb_quantizer
-
+import inject_utils.layers
 import time
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input):
@@ -54,21 +53,22 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
     if inject_input and ("RANDOM" not in inject_input["inject_type"]) and (node.op_type == "DequantizeLinear") and (inject_input["faulty_quantizer_name"] in node.name):
-        """
-        print("--")
         print(node.name)
-        print(inject_input["inject_type"])
-        print("--")
-        """
-        weight_dict, dequantized_operation_input_name, faulty_indices, golden_bit_value, faulty_bit_value, is_signed = perturb_quantizer(model, input_dict, weight_dict, inject_input["faulty_tensor_name"], inject_input["faulty_bit_position"])
-        """
-        print(weight_dict["delta_4d"])
-        print("--")
-        print(weight_dict["delta_4d"][tuple(faulty_indices)])
-        print(np.count_nonzero(weight_dict["delta_4d"]))
-        print("DONE")
-        exit()
-        """
+        weight_dict, dequantized_operation_input_name, faulty_indices, golden_bit_value, faulty_bit_value, is_signed = inject_utils.layers.perturb_quantizer(model, input_dict, weight_dict, inject_input["faulty_tensor_name"], inject_input["faulty_bit_position"])
+
+    if inject_input and ("RANDOM" in inject_input["inject_type"]):
+        if (inject_input) and (inject_input["faulty_operation_name"] in node.name):
+            faulty_value = None
+            target_indices = [np.random.randint(0, dim) for dim in weight_dict[inject_input["faulty_tensor_name"]].shape]
+            golden_value = weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)]
+            if "BITFLIP" in inject_input["inject_type"]:
+                faulty_value, float32_bit_position = inject_utils.layers.float32_bit_flip(weight_dict[inject_input["faulty_tensor_name"]], target_indices)
+            else:
+                faulty_value = delta_init(True)
+            weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)] = faulty_value
+            faulty_indices = target_indices
+            print("DONE")
+            #exit()
 
     return output_tensors, weight_dict, list_operation_time
 

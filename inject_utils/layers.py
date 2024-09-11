@@ -1,6 +1,6 @@
 from onnx import helper, ModelProto, TensorProto, OperatorSetIdProto, shape_inference
 from finn.core.onnx_exec import execute_onnx
-from utils import *
+from inject_utils.utils import *
 import numpy as np
 
 def float32_bit_flip(faulty_tensor, target_indices):

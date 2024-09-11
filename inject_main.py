@@ -406,7 +406,7 @@ def load_trained_model():
 
     for layer in directory_list:
         #for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
-        for fault_model in ["WEIGHT"]:
+        for fault_model in ["RANDOM_BITFLIP"]:
             for bit_position in range(4):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
@@ -425,7 +425,8 @@ def load_trained_model():
                     faulty_tensor_name = int_weight_tensor_name
                 elif "RANDOM" in fault_model:
                     faulty_quantizer_name = None
-                    faulty_tensor_name = output_tensor_name
+                    #faulty_tensor_name = output_tensor_name
+                    faulty_tensor_name = input_inject_data["output_tensor"] 
 
                 #Injection parameters:
                 inject_parameters = {}
