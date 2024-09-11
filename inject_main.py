@@ -406,7 +406,7 @@ def load_trained_model():
 
     for layer in directory_list:
         #for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
-        for fault_model in ["RANDOM_BITFLIP"]:
+        for fault_model in ["INPUT"]:
             for bit_position in range(4):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None

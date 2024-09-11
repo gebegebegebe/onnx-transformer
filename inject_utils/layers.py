@@ -27,6 +27,8 @@ def float16_bit_flip(faulty_tensor, target_indices, bit_position=None):
     faulty_value = bin2fp16(inject_string)
     return faulty_value, flip_bit
 
+# TODO: Clarify in previous attempt that I made a special case for INT4 due to calculations mainly being done in INT8
+
 def flip_int4_bit(value, bit_position):
     mask = 1 << bit_position
     flipped_value = value ^ mask
@@ -34,6 +36,10 @@ def flip_int4_bit(value, bit_position):
         flipped_value -= 16
     if flipped_value < -8:
         flipped_value += 16
+    print("VALUE")
+    print(value)
+    print("FLIPPED")
+    print(flipped_value)
     return flipped_value
 
 def flip_int8_bit(value, bit_position):
@@ -53,8 +59,12 @@ def int_bit_flip(input_dict, target_tensor, target_bit_position, bit_precision=4
     golden_value = (faulty_tensor[tuple(random_indices)])
     faulty_value = faulty_tensor[tuple(random_indices)] ^ faulty_bit
     """
+    """
     faulty_value = flip_int8_bit(faulty_tensor[tuple(random_indices)], target_bit_position)
     assert faulty_value >= -128 and faulty_value <= 127
+    """
+    faulty_value = flip_int4_bit(faulty_tensor[tuple(random_indices)], target_bit_position)
+    assert faulty_value >= -8 and faulty_value <= 7
     return faulty_value, random_indices
 
 def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
@@ -107,6 +117,19 @@ def perturb_conv(model, input_dict, weight_dict, input_tensor_name, bias_output_
     input_dict[input_tensor_name] = weight_dict["delta_4d"]
     no_bias = np.zeros(weight_dict[bias_output_name].shape, dtype=weight_dict[bias_output_name].dtype)
     input_dict[bias_output_name] = no_bias
+    delta_perturb = execute_onnx(model, input_dict)
+    delta_perturb = delta_perturb[list(delta_perturb.keys())[0]]
+    return delta_perturb
+
+def perturb_matmul(model, input_dict, weight_dict, input_tensor_name):
+    input_dict[input_tensor_name] = weight_dict["delta_4d"]
+    """
+    print(np.nonzero(weight_dict["delta_4d"]))
+    indices = []
+    for index in (np.nonzero(weight_dict["delta_4d"])):
+        indices.append(list(index)[0])
+    print(weight_dict["delta_4d"][tuple(indices)])
+    """
     delta_perturb = execute_onnx(model, input_dict)
     delta_perturb = delta_perturb[list(delta_perturb.keys())[0]]
     return delta_perturb

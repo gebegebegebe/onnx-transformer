@@ -52,23 +52,41 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
-    if inject_input and ("RANDOM" not in inject_input["inject_type"]) and (node.op_type == "DequantizeLinear") and (inject_input["faulty_quantizer_name"] in node.name):
-        print(node.name)
-        weight_dict, dequantized_operation_input_name, faulty_indices, golden_bit_value, faulty_bit_value, is_signed = inject_utils.layers.perturb_quantizer(model, input_dict, weight_dict, inject_input["faulty_tensor_name"], inject_input["faulty_bit_position"])
+    if inject_input:
+        if ("RANDOM" not in inject_input["inject_type"]) and (node.op_type == "DequantizeLinear") and (inject_input["faulty_quantizer_name"] in node.name):
+            weight_dict, dequantized_operation_input_name, faulty_indices, golden_bit_value, faulty_bit_value, is_signed = inject_utils.layers.perturb_quantizer(model, input_dict, weight_dict, inject_input["faulty_tensor_name"], inject_input["faulty_bit_position"])
+            inject_input["dequantized_operation_input_name"] = dequantized_operation_input_name
 
-    if inject_input and ("RANDOM" in inject_input["inject_type"]):
-        if (inject_input) and (inject_input["faulty_operation_name"] in node.name):
-            faulty_value = None
-            target_indices = [np.random.randint(0, dim) for dim in weight_dict[inject_input["faulty_tensor_name"]].shape]
-            golden_value = weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)]
-            if "BITFLIP" in inject_input["inject_type"]:
-                faulty_value, float32_bit_position = inject_utils.layers.float32_bit_flip(weight_dict[inject_input["faulty_tensor_name"]], target_indices)
-            else:
-                faulty_value = delta_init(True)
-            weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)] = faulty_value
-            faulty_indices = target_indices
-            print("DONE")
-            #exit()
+        if ("RANDOM" in inject_input["inject_type"]):
+            if (inject_input) and (inject_input["faulty_operation_name"] in node.name):
+                faulty_value = None
+                target_indices = [np.random.randint(0, dim) for dim in weight_dict[inject_input["faulty_tensor_name"]].shape]
+                golden_value = weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)]
+                if "BITFLIP" in inject_input["inject_type"]:
+                    faulty_value, float32_bit_position = inject_utils.layers.float32_bit_flip(weight_dict[inject_input["faulty_tensor_name"]], target_indices)
+                else:
+                    faulty_value = delta_init(True)
+                weight_dict[inject_input["faulty_tensor_name"]][tuple(target_indices)] = faulty_value
+                faulty_indices = target_indices
+
+        if "INPUT" in inject_input["inject_type"] or "WEIGHT" in inject_input["inject_type"]:
+            if (node.op_type == "MatMul") and (node.name == inject_input["faulty_operation_name"]):
+                if not (inject_input["dequantized_operation_input_name"]):
+                    print("Error with dequantized result")
+                    sys.exit(0)
+                print(node.name)
+                print(node.op_type)
+                print(input_dict.keys())
+                delta_perturb = inject_utils.layers.perturb_matmul(model, input_dict, weight_dict, inject_input["dequantized_operation_input_name"])
+                print(delta_perturb.shape)
+                print(np.nonzero(delta_perturb))
+                print("DONE")
+                """
+                delta_perturb = perturb_conv(model, input_dict, weight_dict, dequantized_operation_input_name, bias_output_name)
+                perturb_result = np.add(original_tensor_output,delta_perturb)
+                output_tensors[tensor_output_name] = perturb_result
+                weight_dict[tensor_output_name] = perturb_result
+                """
 
     return output_tensors, weight_dict, list_operation_time
 
