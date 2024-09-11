@@ -245,3 +245,8 @@ def total_bits_diff(tensor1, tensor2):
     total_ff = 0
     print("SECOND DIFF:" + str(second_diff))
     return total_diff, second_diff, total_ff
+
+def debug_inject_parameters(inject_input):
+    for key in inject_input.keys():
+        if key != "original_weight_dict" and key != "main_graph":
+            print(inject_input[key])

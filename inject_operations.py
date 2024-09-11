@@ -4,10 +4,18 @@ from qonnx.core.onnx_exec import execute_onnx
 import onnx.numpy_helper as numpy_helper
 import numpy as np
 import torch
+from inject_utils.utils import *
+from inject_utils.layers import perturb_quantizer
 
 import time
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input):
+    """
+    if (inject_input and False):
+        # Disable debug temporarily with False
+        debug_inject_parameters(inject_input)
+    """
+
     node_inputs = []
     node_outputs = []
 
@@ -44,6 +52,23 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     tensor_output_name = list(output_tensors.keys())[0]
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
+
+    if inject_input and ("RANDOM" not in inject_input["inject_type"]) and (node.op_type == "DequantizeLinear") and (inject_input["faulty_quantizer_name"] in node.name):
+        """
+        print("--")
+        print(node.name)
+        print(inject_input["inject_type"])
+        print("--")
+        """
+        weight_dict, dequantized_operation_input_name, faulty_indices, golden_bit_value, faulty_bit_value, is_signed = perturb_quantizer(model, input_dict, weight_dict, inject_input["faulty_tensor_name"], inject_input["faulty_bit_position"])
+        """
+        print(weight_dict["delta_4d"])
+        print("--")
+        print(weight_dict["delta_4d"][tuple(faulty_indices)])
+        print(np.count_nonzero(weight_dict["delta_4d"]))
+        print("DONE")
+        exit()
+        """
 
     return output_tensors, weight_dict, list_operation_time
 
@@ -112,9 +137,18 @@ def prepare_inference(module_path, module_input_values):
     return module_weight_dict, module_graph
 
 def run_module(module, input_values, module_filepath, module_weight_dict, module_graph, inject_input=None):
+    """
     if inject_input:
         print("WILL INJECT!")
         print(module)
+        for key in inject_input.keys():
+            if key != "main_graph" and key != "original_weight_dict":
+                print("--")
+                print(key)
+                print(inject_input[key])
+                print("--")
+        return
+    """
     for input_name in list(input_values.keys()):
         module_weight_dict[input_name] = input_values[input_name]
 
