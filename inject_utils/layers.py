@@ -121,15 +121,41 @@ def perturb_conv(model, input_dict, weight_dict, input_tensor_name, bias_output_
     delta_perturb = delta_perturb[list(delta_perturb.keys())[0]]
     return delta_perturb
 
-def perturb_matmul(model, input_dict, weight_dict, input_tensor_name):
-    input_dict[input_tensor_name] = weight_dict["delta_4d"]
+def perturb_matmul(model, input_dict, weight_dict, input_tensor_name, transposed_axes=None):
+    targetted_axes = None
+    if transposed_axes:
+        if (transposed_axes.input[0] in input_tensor_name):
+            targetted_axes = list(transposed_axes.attribute[0].ints)
+            input_tensor_name = transposed_axes.output[0]
+            weight_dict["delta_4d"] = np.transpose(weight_dict["delta_4d"], tuple(targetted_axes))
+
     """
+    print("ORIGINAL:")
+    print(input_tensor_name)
+    """
+    """
+    print("TRANSFORMED:")
+    print(input_tensor_name)
+    print("DELTA:")
+    print(weight_dict["delta_4d"])
     print(np.nonzero(weight_dict["delta_4d"]))
-    indices = []
-    for index in (np.nonzero(weight_dict["delta_4d"])):
-        indices.append(list(index)[0])
-    print(weight_dict["delta_4d"][tuple(indices)])
     """
+    """
+    print("DELTA TRANSFORMED:")
+    print(weight_dict["delta_4d"])
+    print(np.nonzero(weight_dict["delta_4d"]))
+    """
+    input_dict[input_tensor_name] = weight_dict["delta_4d"]
+
     delta_perturb = execute_onnx(model, input_dict)
     delta_perturb = delta_perturb[list(delta_perturb.keys())[0]]
+
+    """
+    print(np.nonzero(delta_perturb))
+    print("NONZERO INITIAL")
+    print(np.nonzero(weight_dict["delta_4d"]))
+    print("NONZERO PERTURBED")
+    print(np.nonzero(delta_perturb))
+    exit()
+    """
     return delta_perturb

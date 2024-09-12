@@ -177,9 +177,18 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
     print("WEIGHT NAME:")
     print(weight_name)
     # Retrieve the quantizer node
+    # Additional retrieval of transpose node to get axes
+    transposed_output_name = None
+    #transposed_node_name = None
+    transposed_node = None
+    #transposed_axes = None
     for node in graph.node:
         if node.name == layer_name:
             layer_node = node
+            for input_node in node.input:
+                if "Transpose" in input_node:
+                    transposed_output_name = input_node
+
         for input_node in node.input:
             if input_node == input_name:
                 input_quantizer_name = node.name
@@ -195,14 +204,27 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
                     if "out0" in input_tensor:
                         int_weight_tensor_name = input_tensor
                         break
+
+    if transposed_output_name:
+        for node in graph.node:
+            if (node.output[0]) in transposed_output_name:
+                transposed_node = node
+                #transposed_axes = list(node.attribute[0].ints)
+                break
+
     check_1 = (int_input_tensor_name in quantizer_input_node.input) and (int_weight_tensor_name in quantizer_weight_node.input)
     check_2 = output_tensor in layer_node.output
+
+    print("NODE:")
+    print(transposed_node.name)
+    print("TRANSPOSED:")
+    print(transposed_output_name)
     if not (check_1 and check_2):
         print(check_1)
         print(check_2)
         print(input_name, weight_name, bias_name)
         exit()
-    return (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), (bias_quantizer_name, int_bias_tensor_name)
+    return (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), (bias_quantizer_name, int_bias_tensor_name), transposed_node
 
 def expand_node_inputs_outputs(graph, node):
     added_inputs = []

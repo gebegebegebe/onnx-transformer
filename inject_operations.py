@@ -10,6 +10,9 @@ import time
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input):
     """
+    if ("Transpose" in node.name):
+        print(node)
+
     if (inject_input and False):
         # Disable debug temporarily with False
         debug_inject_parameters(inject_input)
@@ -72,32 +75,46 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
         if "INPUT" in inject_input["inject_type"] or "WEIGHT" in inject_input["inject_type"]:
             if (node.op_type == "MatMul") and (node.name == inject_input["faulty_operation_name"]):
                 if not (inject_input["dequantized_operation_input_name"]):
-                    print("Error with dequantized result")
+                    print("Error with dequantized value")
                     sys.exit(0)
-                print(node.name)
-                print(node.op_type)
-                print(input_dict.keys())
-                delta_perturb = inject_utils.layers.perturb_matmul(model, input_dict, weight_dict, inject_input["dequantized_operation_input_name"])
-                print(delta_perturb.shape)
-                print(np.nonzero(delta_perturb))
-                print("DONE")
+
                 """
-                delta_perturb = perturb_conv(model, input_dict, weight_dict, dequantized_operation_input_name, bias_output_name)
+                transpose_dimensions = None
+                for individual_node in node_inputs:
+                    if "Transpose" in individual_node.name:
+                        transpose_dimensions = []
+                        for dimension in (individual_node.type.tensor_type.shape.dim):
+                            transpose_dimensions.append(int(dimension.dim_value))
+
+                print(transpose_dimensions)
+
+                print("NODE INPUT:")
+                print(node_inputs)
+                print(dir(node_inputs))
+                print(node_inputs[1].name)
+                print(node_inputs[1].type.tensor_type.shape.dim[1])
+                """
+
+                delta_perturb = inject_utils.layers.perturb_matmul(model, input_dict, weight_dict, inject_input["dequantized_operation_input_name"], inject_input["transposed_axes"])
+                print("HERE:")
+                print(np.nonzero(delta_perturb))
+
                 perturb_result = np.add(original_tensor_output,delta_perturb)
                 output_tensors[tensor_output_name] = perturb_result
                 weight_dict[tensor_output_name] = perturb_result
-                """
+                print("DONE")
+                #exit()
 
-    return output_tensors, weight_dict, list_operation_time
+    return output_tensors, weight_dict, list_operation_time, inject_input
 
 def inference(main_graph, weight_dict, module, inject_input):
     def execute_single_node(node, weight_dict, main_graph, module, inject_input):
         final_output_node = node.output[0]
-        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input)
-        return output_tensors, weight_dict, list_operation_time
+        output_tensors, weight_dict, list_operation_time, inject_input = execute_node(node, main_graph, final_output_node, weight_dict, module, inject_input)
+        return output_tensors, weight_dict, list_operation_time, inject_input
     output_tensors = None
     for node in main_graph.node:
-        output_tensors, weight_dict, list_operation_time = execute_single_node(node, weight_dict, main_graph, module, inject_input)
+        output_tensors, weight_dict, list_operation_time, inject_input = execute_single_node(node, weight_dict, main_graph, module, inject_input)
     return output_tensors, weight_dict
 
 def expand_node_inputs_outputs(graph, node, weight_dict, module):

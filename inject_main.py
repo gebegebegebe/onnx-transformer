@@ -412,7 +412,7 @@ def load_trained_model():
                 faulty_bit_position = None
                 if "RANDOM" not in fault_model:
                     faulty_bit_position = int(bit_position)
-                (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _ = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
+                (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, transposed_axes = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
                 original_weight_dict = weight_dict.copy()
 
                 faulty_quantizer_name = None
@@ -438,6 +438,7 @@ def load_trained_model():
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = module 
+                inject_parameters["transposed_axes"] = transposed_axes
                 run_model_example(model_path, inject_parameters, 1)
 
                 #print(inject_parameters)
