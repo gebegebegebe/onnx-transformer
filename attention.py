@@ -12,7 +12,7 @@ from brevitas.quant.scaled_int import Int8WeightPerChannelFloat
 bit_width = 8
 
 class MultiHeadedAttention(nn.Module):
-    def __init__(self, h, d_model, dropout=0.1, channels=128):
+    def __init__(self, h, d_model, dropout=0.1, channels=8):
         "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
@@ -22,10 +22,10 @@ class MultiHeadedAttention(nn.Module):
         self.linears = clones(qnn.QuantLinear(d_model, d_model, bit_width=bit_width, weight_bit_width=bit_width, bias=True, bias_quant=Int32Bias, input_quant=Uint8ActPerTensorFloat, input_bit_width=bit_width), 4)
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
-        self.quantizer_1 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(2, 1, 0, 3), per_channel_broadcastable_shape=(1, 1, channels, 1))
-        self.quantizer_2 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(3, 1, 2, 0), per_channel_broadcastable_shape=(1, 1, 1, channels))
-        self.quantizer_3 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(3, 1, 2, 0), per_channel_broadcastable_shape=(1, 1, 1, channels))
-        self.quantizer_4 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(2, 1, 0, 3), per_channel_broadcastable_shape=(1, 1, channels, 1))
+        self.quantizer_1 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2, 3), per_channel_broadcastable_shape=(1, channels, 1, 1))
+        self.quantizer_2 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2, 3), per_channel_broadcastable_shape=(1, channels, 1, 1))
+        self.quantizer_3 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2, 3), per_channel_broadcastable_shape=(1, channels, 1, 1))
+        self.quantizer_4 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2, 3), per_channel_broadcastable_shape=(1, channels, 1, 1))
         self.quantizers = [self.quantizer_1, self.quantizer_2, self.quantizer_3, self.quantizer_4]
         self.channels = channels
 
@@ -42,6 +42,12 @@ class MultiHeadedAttention(nn.Module):
         p_attn = nn.functional.softmax(scores, dim = -1)
         if dropout is not None:
             p_attn = dropout(p_attn)
+        print("--")
+        print(query.shape)
+        print(key.shape)
+        print(value.shape)
+        print(p_attn.shape)
+        print("--")
         return torch.matmul(self.quantizers[2](p_attn), self.quantizers[3](value)), p_attn
 
         
