@@ -34,36 +34,15 @@ class MultiHeadedAttention(nn.Module):
         "Compute 'Scaled Dot Product Attention'"
         d_k = query.size(-1)
 
-        _, _, channels, _ = (value.shape)
-        print("--")
-        print("value:")
-        print(value.shape)
-        print("key:")
-        print(key.shape)
-        print("query:")
-        print(query.shape)
-
-        # TODO: Fix for decoder
         scores = torch.matmul(self.quantizers[0](query), self.quantizers[1](key.transpose(-2, -1))) \
                  / math.sqrt(d_k)
-        """
-        scores = torch.matmul((query), (key.transpose(-2, -1))) \
-                 / math.sqrt(d_k)
-        """
+
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
         p_attn = nn.functional.softmax(scores, dim = -1)
         if dropout is not None:
             p_attn = dropout(p_attn)
-        print("scores:")
-        print(scores.shape)
-        print("p_attn:")
-        print(p_attn.shape)
-        print("channels:")
-        print(self.channels)
-        print("--")
         return torch.matmul(self.quantizers[2](p_attn), self.quantizers[3](value)), p_attn
-        #return torch.matmul((p_attn), (value)), p_attn
 
         
     def forward(self, query, key, value, mask=None):
