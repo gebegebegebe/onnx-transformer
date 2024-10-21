@@ -23,8 +23,8 @@ def inference_test():
             memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data)
         )
         """
-        test_model.export_encoder(src, src_mask, "onnx/encoder.onnx")
-        test_model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "onnx/decoder.onnx")
+        test_model.export_encoder(src, src_mask, "onnx/test/encoder.onnx")
+        test_model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "onnx/test/decoder.onnx")
         return
         prob = test_model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)

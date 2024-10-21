@@ -26,6 +26,7 @@ from label_smoothing import LabelSmoothing
 from batch import Batch
 
 import nltk
+from nltk.translate.bleu_score import SmoothingFunction
 
 # Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
@@ -526,6 +527,7 @@ def check_outputs(
     output_text = []
     not_working_counter = 0
     for idx in range(n_examples):
+        print("EXAMPLE HERE")
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
@@ -628,26 +630,27 @@ def run_model_example(n_examples=5):
     return model, example_data
 
 """
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
-    memory = model.encode(src, src_mask)
-    ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
-    print("SHAPES:")
-    print(memory.shape)
-    print(src_mask.shape)
-    print(ys.shape)
-    print(subsequent_mask(ys.size(1)).type_as(src.data).shape)
-    for i in range(max_len - 1):
-        out = model.decode(
-            memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data)
-        )
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.data[0]
-        ys = torch.cat(
-            [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
-        )
-    return ys
+    def greedy_decode(model, src, src_mask, max_len, start_symbol):
+        memory = model.encode(src, src_mask)
+        ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+        print("SHAPES:")
+        print(memory.shape)
+        print(src_mask.shape)
+        print(ys.shape)
+        print(subsequent_mask(ys.size(1)).type_as(src.data).shape)
+        for i in range(max_len - 1):
+            out = model.decode(
+                memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data)
+            )
+            prob = model.generator(out[:, -1])
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.data[0]
+            ys = torch.cat(
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+            )
+        return ys
 """
+
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
     batch_size = src.size(0)
     memory = model.encode(src, src_mask)

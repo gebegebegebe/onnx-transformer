@@ -8,14 +8,15 @@ import qonnx.util.cleanup
 
 
 # Load the ONNX model
-model_filename = "encoder_try.onnx"
+model_filename = "decoder_try.onnx"
 model = ModelWrapper(model_filename)
 model = qonnx.util.cleanup.cleanup(in_file=model_filename, out_file=model_filename)
 model = ModelWrapper(model_filename)
 
 #model_weight_dict = torch.load("./weight_dict/decoder_weight_dict.pt")
 
-module = "encoder"
+"""
+module = "decoder"
 if module == "encoder":
     fix_dictionary = {
         "Sub_0_out0": "/layers.0/sublayer.0/norm/Sub_output_0",
@@ -63,6 +64,7 @@ for node in model.graph.node:
             node.input[i] = fix_dictionary[node.input[i]]
     print(node.input)
     print("---")
+"""
 
 """
 for key, value in fix_dictionary.items():
@@ -79,4 +81,4 @@ for value_info in model.graph.value_info:
 """
 
 # Save the modified model
-model.save("encoder_fixed.onnx")
+#model.save("test/decoder_fixed.onnx")

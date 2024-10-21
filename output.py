@@ -606,9 +606,11 @@ def run_model_example(n_examples=5):
     print("Loading Trained Model ...")
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    """
     model.load_state_dict(
         torch.load("checkpoint/iwslt14_model_00.pt", map_location=torch.device("cpu"))
     )
+    """
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
@@ -617,8 +619,9 @@ def run_model_example(n_examples=5):
     return model, example_data
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
+    model.eval()
     memory = model.encode(src, src_mask)
-    model.export_encoder(src, src_mask, "encoder_try.onnx")
+    model.export_encoder(src, src_mask, "./try/encoder_try.onnx")
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
     for i in range(max_len - 1):
         print("--")
@@ -635,7 +638,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         print(subsequent_mask(ys.size(1)).type_as(src.data).dtype)
         print(subsequent_mask(ys.size(1)).type_as(src.data).shape)
         print("--")
-        model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "decoder_try.onnx")
+        model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "./try/decoder_try.onnx")
         exit()
         out = model.decode(
             memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data)
