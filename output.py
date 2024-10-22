@@ -601,6 +601,7 @@ def run_model_example(n_examples=5):
         spacy_en,
         batch_size=1,
         is_distributed=False,
+        max_padding=72,
     )
 
     print("Loading Trained Model ...")
@@ -618,13 +619,30 @@ def run_model_example(n_examples=5):
     )
     return model, example_data
 
+def load_vocab():
+    if not exists("vocab.pt"):
+        print("ERROR")
+        exit()
+    else:
+        vocab_src, vocab_tgt = torch.load("vocab.pt")
+    print("Finished.\nVocabulary sizes:")
+    print(len(vocab_src))
+    print(len(vocab_tgt))
+    return vocab_src, vocab_tgt
+
 def greedy_decode(model, src, src_mask, max_len, start_symbol):
+    print("SRC")
+    print(src.shape)
+    vocab_src, vocab_tgt = load_vocab()
     model.eval()
     memory = model.encode(src, src_mask)
     model.export_encoder(src, src_mask, "./try/encoder_try.onnx")
-    ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+    ys = torch.zeros(1, 71).fill_(start_symbol).type_as(src.data)
     for i in range(max_len - 1):
+        """
         print("--")
+        print("MAX LEN:")
+        print(max_len)
         print("MEMORY:")
         print(memory.dtype)
         print(memory.shape)
@@ -638,6 +656,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         print(subsequent_mask(ys.size(1)).type_as(src.data).dtype)
         print(subsequent_mask(ys.size(1)).type_as(src.data).shape)
         print("--")
+        """
         model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "./try/decoder_try.onnx")
         exit()
         out = model.decode(
@@ -664,7 +683,7 @@ def subsequent_mask(size):
 
 def load_trained_model():
     config = {
-        "batch_size": 32,
+        "batch_size": 1,
         "distributed": False,
         "num_epochs": 8,
         "accum_iter": 10,
