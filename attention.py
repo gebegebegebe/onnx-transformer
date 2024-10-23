@@ -33,45 +33,44 @@ class MultiHeadedAttention(nn.Module):
         self.quantizer_weights_value = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0), per_channel_broadcastable_shape=(1, d_model))
         self.quantizer_weights_output = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0), per_channel_broadcastable_shape=(1, d_model))
 
-        """
-        self.quantizer_1 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 2, 0, 3), per_channel_broadcastable_shape=(1, 1, num_tokens, 1))
-        self.quantizer_2 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 2, 0, 3), per_channel_broadcastable_shape=(1, 1, 72, 1))
-        self.quantizer_3 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 2, 0, 3), per_channel_broadcastable_shape=(1, 1, 72, 1))
-        self.quantizer_4 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 2, 0, 3), per_channel_broadcastable_shape=(1, 1, num_tokens, 1))
-        """
+        self.quantizer_1 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(2, 1, 0, 3), per_channel_broadcastable_shape=(1, 1, num_tokens_1, 1))
+        self.quantizer_2 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(3, 1, 2, 0), per_channel_broadcastable_shape=(1, 1, 1, num_tokens_2))
+        self.quantizer_3 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(2, 1, 0, 3), per_channel_broadcastable_shape=(1, 1, num_tokens_1, 1))
+        self.quantizer_4 = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(2, 1, 0, 3), per_channel_broadcastable_shape=(1, 1, num_tokens_2, 1))
 
         self.quantizer_query = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2), per_channel_broadcastable_shape=(1, num_tokens_1, 1))
         self.quantizer_key = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2), per_channel_broadcastable_shape=(1, num_tokens_2, 1))
         self.quantizer_value = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2), per_channel_broadcastable_shape=(1, num_tokens_2, 1))
         self.quantizer_output = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0, 2), per_channel_broadcastable_shape=(1, num_tokens_1, 1))
 
-        #self.quantizers = [self.quantizer_1, self.quantizer_2, self.quantizer_3, self.quantizer_4]
+        self.quantizers = [self.quantizer_1, self.quantizer_2, self.quantizer_3, self.quantizer_4]
 
 
     def attention(self, query, key, value, mask=None, dropout=None, quantizers=None):
         "Compute 'Scaled Dot Product Attention'"
         d_k = query.size(-1)
 
-        #scores = torch.matmul(self.quantizers[0](query), self.quantizers[1](key.transpose(-2, -1))) \
-                 #/ math.sqrt(d_k)
-        scores = torch.matmul((query), (key.transpose(-2, -1))) \
+        query = self.quantizers[0](query)
+        key = self.quantizers[1](key.transpose(-2, -1))
+        scores = torch.matmul(query, key) \
                  / math.sqrt(d_k)
+        #scores = torch.matmul((query), (key.transpose(-2, -1))) \
+                 #/ math.sqrt(d_k)
 
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
         p_attn = nn.functional.softmax(scores, dim = -1)
         if dropout is not None:
             p_attn = dropout(p_attn)
-        """
         print("--")
         print(query.shape)
         print(key.shape)
         print(value.shape)
         print(p_attn.shape)
         print("--")
-        """
-        #return torch.matmul(self.quantizers[2](p_attn), self.quantizers[3](value)), p_attn
-        return torch.matmul((p_attn), (value)), p_attn
+
+        return torch.matmul(self.quantizers[2](p_attn), self.quantizers[3](value)), p_attn
+        #return torch.matmul((p_attn), (value)), p_attn
 
         
     def forward(self, query, key, value, mask=None):
@@ -82,13 +81,12 @@ class MultiHeadedAttention(nn.Module):
         nbatches = query.size(0)
         
         # 1) Do all the linear projections in batch from d_model => h x d_k 
-        print(self.quantizer_query(query).shape, self.quantizer_key(key).shape, self.quantizer_value(value).shape)
+        #print(self.quantizer_query(query).shape, self.quantizer_key(key).shape, self.quantizer_value(value).shape)
         #[l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
         query, key, value = \
             [torch.matmul(x, w).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              #for l, x, w in zip(self.linears, (self.quantizer_query(query), self.quantizer_key(key), self.quantizer_value(value)), (self.weights_query, self.weights_key, self.weights_value))]
              for x, w in zip((self.quantizer_query(query), self.quantizer_key(key), self.quantizer_value(value)), (self.quantizer_weights_query(self.weights_query), self.quantizer_weights_key(self.weights_key), self.quantizer_weights_value(self.weights_value)))]
-        print(query.shape, key.shape, value.shape)
         
         # 2) Apply attention on all the projected vectors in batch. 
         x, self.attn = self.attention(query, key, value, mask, self.dropout, None)
