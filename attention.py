@@ -28,6 +28,7 @@ class MultiHeadedAttention(nn.Module):
         self.weights_key = nn.Parameter(torch.randn(d_model, d_model))
         self.weights_value = nn.Parameter(torch.randn(d_model, d_model))
         self.weights_final = nn.Parameter(torch.randn(d_model, d_model))
+
         self.quantizer_weights_query = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0), per_channel_broadcastable_shape=(1, d_model))
         self.quantizer_weights_key = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0), per_channel_broadcastable_shape=(1, d_model))
         self.quantizer_weights_value = qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True, scaling_per_output_channel=True, scaling_stats_permute_dims=(1, 0), per_channel_broadcastable_shape=(1, d_model))
@@ -94,4 +95,4 @@ class MultiHeadedAttention(nn.Module):
         # 3) "Concat" using a view and apply a final linear. 
         x = x.transpose(1, 2).contiguous() \
              .view(nbatches, -1, self.h * self.d_k)
-        return torch.matmul(self.quantizer_output(x), self.weights_final)
+        return torch.matmul(self.quantizer_output(x), self.quantizer_weights_output(self.weights_final))

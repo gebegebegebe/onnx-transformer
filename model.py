@@ -23,11 +23,13 @@ def make_model(src_vocab, tgt_vocab, N=6,
     attn_3 = MultiHeadedAttention(h, d_model, num_tokens_1=71, num_tokens_2=72)
 
     ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+    ff_2 = PositionwiseFeedForward(d_model, d_ff, dropout, num_tokens=71)
+
     position = PositionalEncoding(d_model, dropout)
     model = EncoderDecoder(
         Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
         Decoder(DecoderLayer(d_model, attn_2, attn_3,
-                             c(ff), dropout), N),
+                             ff_2, dropout), N),
         nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
         nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
         Generator(d_model, tgt_vocab))
