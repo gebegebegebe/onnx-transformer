@@ -1,11 +1,13 @@
 from attention import MultiHeadedAttention
+from position_feed_forward import PositionwiseFeedForward
 import torch
 from model import make_model
 from layer_norm import LayerNorm
 import torch.nn as nn
+from quant_linear import W8A8Linear
 
 @torch.no_grad()
-def smooth_ln_fcs(ln, fcs, act_scales, alpha=0.5):
+def smooth_ln_fcs(ln, fcs, act_scales, name, alpha=0.5):
     if not isinstance(fcs, list):
         fcs = [fcs]
     assert isinstance(ln, LayerNorm)
@@ -32,7 +34,6 @@ def smooth_ln_fcs(ln, fcs, act_scales, alpha=0.5):
 
     for fc in fcs:
         fc.weight.mul_(scales.view(1, -1))
-        print("FOO")
 
 def load_vocab():
     vocab_src, vocab_tgt = torch.load("vocab.pt")
@@ -56,10 +57,10 @@ def smooth_lm(model, scales, alpha=0.5):
         linears_0 = layer_name + ".self_attn.linears.0"
         linears_1 = layer_name + ".self_attn.linears.1"
         linears_2 = layer_name + ".self_attn.linears.2"
-        linears_3 = layer_name + ".self_attn.linears.3"
+        #linears_3 = layer_name + ".self_attn.linears.3"
         norm_1 = layer_name + ".sublayer.1.norm"
         w_1 = layer_name + ".feed_forward.w_1"
-        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3, norm_1, w_1]
+        target_keys = [norm_0, linears_0, linears_1, linears_2, norm_1, w_1]
         return get_target_dict(target_keys)
             
     def get_layer_ops_decoder_self_attn(layer_name):
@@ -68,8 +69,8 @@ def smooth_lm(model, scales, alpha=0.5):
         linears_0 = layer_name + ".self_attn.linears.0"
         linears_1 = layer_name + ".self_attn.linears.1"
         linears_2 = layer_name + ".self_attn.linears.2"
-        linears_3 = layer_name + ".self_attn.linears.3"
-        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3]
+        #linears_3 = layer_name + ".self_attn.linears.3"
+        target_keys = [norm_0, linears_0, linears_1, linears_2]#, linears_3]
         return get_target_dict(target_keys)
             
     def get_layer_ops_decoder_src_attn(layer_name):
@@ -78,16 +79,15 @@ def smooth_lm(model, scales, alpha=0.5):
         linears_0 = layer_name + ".src_attn.linears.0"
         linears_1 = layer_name + ".src_attn.linears.1"
         linears_2 = layer_name + ".src_attn.linears.2"
-        linears_3 = layer_name + ".src_attn.linears.3"
+        #linears_3 = layer_name + ".src_attn.linears.3"
         norm_1 = layer_name + ".sublayer.2.norm"
         w_1 = layer_name + ".feed_forward.w_1"
-        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3, norm_1, w_1]
+        target_keys = [norm_0, linears_0, linears_1, linears_2, norm_1, w_1]
         return get_target_dict(target_keys)
             
     for name, module in model.named_modules():
-        print(name)
         if isinstance(module, MultiHeadedAttention): 
-            if ("decoder" not in name):
+            if ("encoder" in name):
                 name = name[:-10]
                 target_ops = get_layer_ops_encoder(name)
 
@@ -98,7 +98,7 @@ def smooth_lm(model, scales, alpha=0.5):
                     [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
                 ]
                 qkv_input_scales = scales[name + ".self_attn.linears.0"]
-                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, name, alpha)
 
                 ffn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.1.norm" in key][0],
                 fc1 = [target_ops[key] for key in list(target_ops.keys()) if ".feed_forward.w_1" in key][0],
@@ -107,9 +107,10 @@ def smooth_lm(model, scales, alpha=0.5):
                     ffn_ln = ffn_ln[0]
                 if isinstance(fc1, tuple):
                     fc1 = fc1[0]
-                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, alpha)
+                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, name, alpha)
+                continue
 
-            elif ("self_attn" in name):
+            elif ("decoder" in name) and (".self_attn" in name):
                 name = name[:16]
                 target_ops = get_layer_ops_decoder_self_attn(name)
 
@@ -120,9 +121,10 @@ def smooth_lm(model, scales, alpha=0.5):
                     [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
                 ]
                 qkv_input_scales = scales[name + ".self_attn.linears.0"]
-                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, name, alpha)
+                continue
 
-            elif ("src_attn" in name):
+            elif ("decoder" in name) and ("src_attn" in name):
                 name = name[:16]
                 target_ops = get_layer_ops_decoder_src_attn(name)
 
@@ -133,7 +135,7 @@ def smooth_lm(model, scales, alpha=0.5):
                     [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
                 ]
                 qkv_input_scales = scales[name + ".src_attn.linears.0"]
-                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, name, alpha)
 
                 ffn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.2.norm" in key][0],
                 fc1 = [target_ops[key] for key in list(target_ops.keys()) if ".feed_forward.w_1" in key][0],
@@ -142,13 +144,59 @@ def smooth_lm(model, scales, alpha=0.5):
                     ffn_ln = ffn_ln[0]
                 if isinstance(fc1, tuple):
                     fc1 = fc1[0]
-                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, alpha)
+                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, name, alpha)
+                continue
+
+def quantize_transformer(model, weight_quant="per_channel", act_quant="per_token", quantize_bmm_input=True):
+    for name, module in model.named_modules():
+        if isinstance(module, PositionwiseFeedForward):
+            module.w_1 = W8A8Linear.from_float(
+                module.w_1, weight_quant=weight_quant, act_quant=act_quant
+            ) 
+            module.w_2 = W8A8Linear.from_float(
+                module.w_2, weight_quant=weight_quant, act_quant=act_quant
+            ) 
+        elif isinstance(module, MultiHeadedAttention):
+            module.linears[0] = W8A8Linear.from_float(
+                module.linears[0], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+            ) 
+            module.linears[1] = W8A8Linear.from_float(
+                module.linears[1], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+            ) 
+            module.linears[2] = W8A8Linear.from_float(
+                module.linears[2], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+            ) 
+            module.linears[3] = W8A8Linear.from_float(
+                module.linears[3], weight_quant=weight_quant, act_quant=act_quant
+            ) 
+    return model
 
 def main():
+    import copy
     vocab_src, vocab_tgt = load_vocab()
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    model.load_state_dict(torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu")))
+
+    original_parameters = {}
+    for name, parameter in model.named_parameters():
+        original_parameters[name] = copy.deepcopy(parameter)
+
     act_scales = torch.load("scales/transformer_scales.pt")
     smooth_lm(model, act_scales)
+
+    ptq_parameters = {}
+    for name, parameter in model.named_parameters():
+        ptq_parameters[name] = parameter 
+
+    for name, parameter in model.named_parameters():
+        if (("encoder" in name) or ("decoder" in name)) and ("bias" not in name):
+            if (torch.equal(original_parameters[name], ptq_parameters[name])):
+                print("--")
+                print(name)
+
+    print("FOOBARBAZ")
+    model = quantize_transformer(model)
+    print(model)
 
 if __name__ == "__main__":
     main()

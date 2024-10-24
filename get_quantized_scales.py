@@ -187,6 +187,7 @@ def main():
 
     vocab_src, vocab_tgt = load_vocab()
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    model.load_state_dict(torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu")))
 
     train_iter = create_dataset("./data/train.de.bpe","./data/train.en.bpe")
     valid_iter = create_dataset("./data/valid.de.bpe","./data/valid.en.bpe")
@@ -218,7 +219,7 @@ def main():
     )
 
     pad_idx = vocab_tgt["<blank>"]
-    act_scales = get_act_scales(model, (Batch(b[0], b[1], pad_idx) for b in valid_dataloader), vocab_tgt, 10, 128)
+    act_scales = get_act_scales(model, (Batch(b[0], b[1], pad_idx) for b in valid_dataloader), vocab_tgt, 512, 128)
     torch.save(act_scales, "scales/transformer_scales.pt")
     print(torch.load("scales/transformer_scales.pt").keys())
 
