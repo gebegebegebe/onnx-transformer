@@ -101,7 +101,6 @@ def run_epoch(
             )
             start = time.time()
             tokens = 0
-        print(loss)
         del loss
         del loss_node
     return total_loss / total_tokens, train_state
@@ -341,7 +340,6 @@ def create_dataloaders(
     valid_sampler = (
         DistributedSampler(valid_iter_map) if is_distributed else None
     )
-
     train_dataloader = DataLoader(
         train_iter_map,
         batch_size=batch_size,
@@ -356,6 +354,10 @@ def create_dataloaders(
         sampler=valid_sampler,
         collate_fn=collate_fn,
     )
+    print("FOCUS")
+    print(type(train_dataloader))
+    print(dir(train_dataloader))
+
     return train_dataloader, valid_dataloader
 
 def train_worker(
@@ -481,7 +483,7 @@ def train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
 
 def load_trained_model():
     config = {
-        "batch_size": 32,
+        "batch_size": 1,
         "distributed": False,
         "num_epochs": 8,
         "accum_iter": 10,
