@@ -58,14 +58,38 @@ def smooth_lm(model, scales, alpha=0.5):
         linears_2 = layer_name + ".self_attn.linears.2"
         linears_3 = layer_name + ".self_attn.linears.3"
         norm_1 = layer_name + ".sublayer.1.norm"
-        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3, norm_1]
+        w_1 = layer_name + ".feed_forward.w_1"
+        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3, norm_1, w_1]
+        return get_target_dict(target_keys)
+            
+    def get_layer_ops_decoder_self_attn(layer_name):
+        layer_number = layer_name[-1]
+        norm_0 = layer_name + ".sublayer.0.norm"
+        linears_0 = layer_name + ".self_attn.linears.0"
+        linears_1 = layer_name + ".self_attn.linears.1"
+        linears_2 = layer_name + ".self_attn.linears.2"
+        linears_3 = layer_name + ".self_attn.linears.3"
+        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3]
+        return get_target_dict(target_keys)
+            
+    def get_layer_ops_decoder_src_attn(layer_name):
+        layer_number = layer_name[-1]
+        norm_0 = layer_name + ".sublayer.1.norm"
+        linears_0 = layer_name + ".src_attn.linears.0"
+        linears_1 = layer_name + ".src_attn.linears.1"
+        linears_2 = layer_name + ".src_attn.linears.2"
+        linears_3 = layer_name + ".src_attn.linears.3"
+        norm_1 = layer_name + ".sublayer.2.norm"
+        w_1 = layer_name + ".feed_forward.w_1"
+        target_keys = [norm_0, linears_0, linears_1, linears_2, linears_3, norm_1, w_1]
         return get_target_dict(target_keys)
             
     for name, module in model.named_modules():
         print(name)
         if isinstance(module, MultiHeadedAttention): 
             if ("decoder" not in name):
-                target_ops = get_layer_ops_encoder(name[:-10])
+                name = name[:-10]
+                target_ops = get_layer_ops_encoder(name)
 
                 attn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.0.norm" in key][0]
                 qkv = [ 
@@ -73,9 +97,52 @@ def smooth_lm(model, scales, alpha=0.5):
                     [target_ops[key] for key in list(target_ops.keys()) if ".linears.1" in key][0],
                     [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
                 ]
-                name = "encoder.layers.0"
                 qkv_input_scales = scales[name + ".self_attn.linears.0"]
                 smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+
+                ffn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.1.norm" in key][0],
+                fc1 = [target_ops[key] for key in list(target_ops.keys()) if ".feed_forward.w_1" in key][0],
+                fc1_input_scales = scales[name + ".feed_forward.w_1"]
+                if isinstance(ffn_ln, tuple):
+                    ffn_ln = ffn_ln[0]
+                if isinstance(fc1, tuple):
+                    fc1 = fc1[0]
+                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, alpha)
+
+            elif ("self_attn" in name):
+                name = name[:16]
+                target_ops = get_layer_ops_decoder_self_attn(name)
+
+                attn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.0.norm" in key][0]
+                qkv = [ 
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.0" in key][0],
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.1" in key][0],
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
+                ]
+                qkv_input_scales = scales[name + ".self_attn.linears.0"]
+                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+
+            elif ("src_attn" in name):
+                name = name[:16]
+                target_ops = get_layer_ops_decoder_src_attn(name)
+
+                attn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.1.norm" in key][0]
+                qkv = [ 
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.0" in key][0],
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.1" in key][0],
+                    [target_ops[key] for key in list(target_ops.keys()) if ".linears.2" in key][0],
+                ]
+                qkv_input_scales = scales[name + ".src_attn.linears.0"]
+                smooth_ln_fcs(attn_ln, qkv, qkv_input_scales, alpha)
+
+                ffn_ln = [target_ops[key] for key in list(target_ops.keys()) if ".sublayer.2.norm" in key][0],
+                fc1 = [target_ops[key] for key in list(target_ops.keys()) if ".feed_forward.w_1" in key][0],
+                fc1_input_scales = scales[name + ".feed_forward.w_1"]
+                if isinstance(ffn_ln, tuple):
+                    ffn_ln = ffn_ln[0]
+                if isinstance(fc1, tuple):
+                    fc1 = fc1[0]
+                smooth_ln_fcs(ffn_ln, fc1, fc1_input_scales, alpha)
 
 def main():
     vocab_src, vocab_tgt = load_vocab()
