@@ -13,7 +13,7 @@ from generator import Generator
 import brevitas.nn as qnn
 
 def make_model(src_vocab, tgt_vocab, N=6,
-               d_model=512, d_ff=2048, h=8, dropout=0.1):
+               d_model=512, d_ff=2048, h=8, dropout=0.3):
     "Helper: Construct a model from hyperparameters."
     dropout = 0.3
     c = copy.deepcopy

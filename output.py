@@ -24,6 +24,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from model import make_model
 from label_smoothing import LabelSmoothing
 from batch import Batch
+from get_quantized_model import get_quantized
 
 import nltk
 
@@ -401,7 +402,6 @@ def train_worker(
     d_model = 512
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     #model.cuda(gpu)
-    module = model
     is_main_process = True
     if is_distributed:
         dist.init_process_group(
@@ -607,6 +607,7 @@ def run_model_example(n_examples=5):
     print("Loading Trained Model ...")
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    #model = get_quantized(model)
     """
     model.load_state_dict(
         torch.load("checkpoint/iwslt14_model_00.pt", map_location=torch.device("cpu"))

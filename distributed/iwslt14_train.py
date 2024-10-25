@@ -477,9 +477,9 @@ def train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
 
 def load_trained_model():
     config = {
-        "batch_size": 200,
+        "batch_size": 128,
         "distributed": True,
-        "num_epochs": 8,
+        "num_epochs": 50,
         "accum_iter": 10,
         "base_lr": 1.0,
         "max_padding": 72,

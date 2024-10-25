@@ -158,17 +158,23 @@ def quantize_transformer(model, weight_quant="per_channel", act_quant="per_token
             ) 
         elif isinstance(module, MultiHeadedAttention):
             module.linears[0] = W8A8Linear.from_float(
-                module.linears[0], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+                module.linears[0], weight_quant=weight_quant, act_quant=act_quant, quantize_output=quantize_bmm_input
             ) 
             module.linears[1] = W8A8Linear.from_float(
-                module.linears[1], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+                module.linears[1], weight_quant=weight_quant, act_quant=act_quant, quantize_output=quantize_bmm_input
             ) 
             module.linears[2] = W8A8Linear.from_float(
-                module.linears[2], weight_quant=weight_quant, act_quant=act_quant, quantize_output=True
+                module.linears[2], weight_quant=weight_quant, act_quant=act_quant, quantize_output=quantize_bmm_input
             ) 
             module.linears[3] = W8A8Linear.from_float(
                 module.linears[3], weight_quant=weight_quant, act_quant=act_quant
             ) 
+    return model
+
+def get_quantized(model):
+    act_scales = torch.load("scales/transformer_scales.pt")
+    smooth_lm(model, act_scales)
+    model = quantize_transformer(model)
     return model
 
 def main():
