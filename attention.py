@@ -6,7 +6,7 @@ from utils import clones
 from layer_norm import LayerNorm
 
 class MultiHeadedAttention(nn.Module):
-    def __init__(self, h, d_model, dropout=0.1, do_quantization=False):
+    def __init__(self, h, d_model, dropout=0.1, do_quantization=True):
         "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
@@ -29,7 +29,13 @@ class MultiHeadedAttention(nn.Module):
         if dropout is not None:
             p_attn = dropout(p_attn)
         if self.quantize:
+            print("---")
+            print(p_attn)
             p_attn.mul_(127).round_().to(torch.int8)
+            p_attn.to(torch.float32).div_(127)
+            print("--")
+            print(p_attn)
+            print("---")
         return torch.matmul(p_attn, value), p_attn
 
 
