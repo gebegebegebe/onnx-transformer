@@ -607,12 +607,10 @@ def run_model_example(n_examples=5):
     print("Loading Trained Model ...")
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
-    #model = get_quantized(model)
-    """
+    model = get_quantized(model)
     model.load_state_dict(
-        torch.load("checkpoint/iwslt14_model_00.pt", map_location=torch.device("cpu"))
+        torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu"))
     )
-    """
 
     print("Checking Model Outputs:")
     example_data = check_outputs(

@@ -28,6 +28,8 @@ from batch import Batch
 import nltk
 from nltk.translate.bleu_score import SmoothingFunction
 
+from get_quantized_model import get_quantized
+
 # Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
 RUN_EXAMPLES = True
@@ -619,9 +621,12 @@ def run_model_example(n_examples=5):
     print("Loading Trained Model ...")
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    model = get_quantized(model)
     model.load_state_dict(
-        torch.load("checkpoint/iwslt14_model_00.pt", map_location=torch.device("cpu"))
+        torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu"))
     )
+    print(model.state_dict().keys())
+    exit()
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
@@ -690,7 +695,7 @@ def load_trained_model():
         "file_prefix": "multi30k_model_",
     }
     #model_path = "multi30k_model_final.pt"
-    model_path = "checkpoint/iwslt14_model_00.pt"
+    model_path = "checkpoint/iwslt14_model_final.pt"
     if not exists(model_path):
         train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config)
     else:

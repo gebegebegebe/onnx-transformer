@@ -101,7 +101,10 @@ class W8A8Linear(nn.Module):
     @torch.no_grad()
     def forward(self, x):
         q_x = self.act_quant(x)
-        y = torch.functional.F.linear(q_x, self.weight, self.bias)
+        q_w = self.weight = quantize_weight_per_channel_absmax(
+                self.weight, n_bits=8
+            )
+        y = torch.functional.F.linear(q_x, q_w, self.bias)
         q_y = self.output_quant(y)
         return q_y
 
