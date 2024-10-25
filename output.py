@@ -611,6 +611,7 @@ def run_model_example(n_examples=5):
     model.load_state_dict(
         torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu"))
     )
+    model.eval()
 
     print("Checking Model Outputs:")
     example_data = check_outputs(

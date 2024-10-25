@@ -5,6 +5,8 @@ import math
 from utils import clones
 from layer_norm import LayerNorm
 
+import copy
+
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1, do_quantization=True):
         "Take in model size and number of heads."
@@ -29,17 +31,22 @@ class MultiHeadedAttention(nn.Module):
         if dropout is not None:
             p_attn = dropout(p_attn)
         if self.quantize:
-            print("---")
-            print(p_attn)
             p_attn.mul_(127).round_().to(torch.int8)
             p_attn.to(torch.float32).div_(127)
-            print("--")
-            print(p_attn)
-            print("---")
         return torch.matmul(p_attn, value), p_attn
 
 
     def forward(self, query, key, value, mask=None):
+        def temp(l, x):
+            print("##")
+            print(query)
+            print("--")
+            print(key)
+            print("--")
+            print(value)
+            print("##")
+            print(type(l))
+            return l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
         "Implements Figure 2"
         if mask is not None:
             # Same mask applied to all h heads.
@@ -48,8 +55,7 @@ class MultiHeadedAttention(nn.Module):
         
         # 1) Do all the linear projections in batch from d_model => h x d_k 
         query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-             for l, x in zip(self.linears, (query, key, value))]
+            [temp(l, x) for l, x in zip(self.linears, (query, key, value))]
         
         # 2) Apply attention on all the projected vectors in batch. 
         x, self.attn = self.attention(query, key, value, mask=mask, 

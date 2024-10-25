@@ -7,8 +7,13 @@ def quantize_weight_per_channel_absmax(w, n_bits=8):
     # w: (out_features, in_features)
     scales = w.abs().max(dim=-1, keepdim=True)[0]
     q_max = 2 ** (n_bits - 1) - 1
-    scales.clamp_(min=1e-5).div_(q_max)
-    w.div_(scales).round_().mul_(scales)
+    #scales.clamp_(min=1e-5).div_(q_max)
+    scales = scales.clamp(min=1e-5)
+    scales = scales.div(q_max)
+    #w.div_(scales).round_().mul_(scales)
+    w = w.div(scales)
+    w = w.round()
+    w = w.mul(scales)
     return w
 
 
@@ -28,8 +33,13 @@ def quantize_activation_per_token_absmax(t, n_bits=8):
     t.view(-1, t_shape[-1])
     scales = t.abs().max(dim=-1, keepdim=True)[0]
     q_max = 2 ** (n_bits - 1) - 1
-    scales.clamp_(min=1e-5).div_(q_max)
-    t.div_(scales).round_().mul_(scales)
+    #scales.clamp_(min=1e-5).div_(q_max)
+    scales = scales.clamp(min=1e-5)
+    scales = scales.div(q_max)
+    #t.div_(scales).round_().mul_(scales)
+    t = t.div(scales)
+    t = t.round()
+    t = t.mul(scales)
     return t
 
 
@@ -108,7 +118,7 @@ class W8A8Linear(nn.Module):
         q_y = self.output_quant(y)
         return q_y
 
-    @staticmethod
+    #@staticmethod
     def from_float(
         module, weight_quant="per_channel", act_quant="per_token", quantize_output=False
     ):
