@@ -4,8 +4,12 @@ from qonnx.core.onnx_exec import execute_onnx
 import onnx.numpy_helper as numpy_helper
 import numpy as np
 import torch
+import onnx
+
+from onnx.shape_inference import infer_shapes
 
 import time
+import copy
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module):
     node_inputs = []
@@ -18,6 +22,10 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     desired_node_outputs = [x for x in node_outputs if x.name == final_output_node]
     intermediate_node_outputs = [x for x in node_outputs if x.name != final_output_node]
     
+    for index, node_input in enumerate(node.input):
+        if (len(node_input)) == 0:
+            node.input[index] = node_inputs[-1].name
+
     graph = helper.make_graph(
             nodes = [node],
             name = "single_node_exec",
@@ -26,13 +34,12 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     )
 
     model = ModelProto()
-    model = shape_inference.infer_shapes(model)
+    model = infer_shapes(model, data_prop=True)
     model.graph.CopyFrom(graph)
     model.opset_import.append(OperatorSetIdProto(version=13))
     model = ModelWrapper(model)
-
+    
     input_dict = {}
-
     for node_iter in node_inputs:
         if node_iter.name == [node_intermediate.name for node_intermediate in intermediate_node_outputs]:
             continue
@@ -40,6 +47,10 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
             continue
         input_dict[node_iter.name] = weight_dict[node_iter.name]
 
+    print("--")
+    print(node.name)
+    print(node)
+    print(input_dict.keys())
     output_tensors = execute_onnx(model, input_dict)
     tensor_output_name = list(output_tensors.keys())[0]
     original_tensor_output = output_tensors[tensor_output_name]
@@ -69,6 +80,13 @@ def expand_node_inputs_outputs(graph, node, weight_dict, module):
     added_outputs += list(filter(lambda x: x.name in node.output, graph.value_info))
 
     start_time = time.time()
+
+    if len(node.input) != len(added_inputs):
+        if "Clip" in node.name:
+            added_inputs.append(copy.deepcopy(added_inputs[0]))
+            added_inputs[-1].name = added_inputs[-1].name[:-1] + "2"
+            weight_dict[added_inputs[-1].name] = np.array(3.4e38, dtype=np.float32)
+
     if module == "decoder":
         replacement_dictionary = {
             "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
@@ -121,29 +139,30 @@ def run_module(module, input_values, module_filepath, module_weight_dict, module
 
     return inference(module_graph, module_weight_dict, module)
 
+"""
 if __name__ == "__main__":
-
     module = "encoder"
     encoder_input_values = {
-        "global_in": np.random.rand(1, 128, 512).astype(np.float32), 
-        "global_in_1": np.random.choice([True, False], size=(1, 1, 128))}
+        "global_in": np.random.rand(1, 72, 512).astype(np.float32), 
+        "global_in_1": np.random.choice([True, False], size=(1, 1, 72))}
     module_filepath = "./onnx/new_fixed/encoder_fixed.onnx"
     output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
     torch.save(module_weight_dict, "encoder.pt")
 
-    print("ENCODER OUT:")
-    print(output_tensors)
+    #print("ENCODER OUT:")
+    #print(output_tensors)
 
     module = "decoder"
     decoder_input_values = {
         "global_in": np.random.rand(1, 1, 512).astype(np.float32), 
-        "global_in_1": np.random.rand(1, 128, 512).astype(np.float32), 
-        "global_in_2": np.random.choice([True, False], size=(1, 1, 128)),
+        "global_in_1": np.random.rand(1, 72, 512).astype(np.float32), 
+        "global_in_2": np.random.choice([True, False], size=(1, 1, 72)),
         "global_in_3": np.random.rand(1, 1, 1).astype(np.int64)}
     module_filepath = "./onnx/new_fixed/decoder_fixed.onnx"
 
     output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
     torch.save(module_weight_dict, "decoder.pt")
 
-    print("DECODER OUT:")
-    print(output_tensors)
+    #print("DECODER OUT:")
+    #print(output_tensors)
+"""

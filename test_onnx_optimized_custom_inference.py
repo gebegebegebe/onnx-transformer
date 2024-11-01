@@ -24,9 +24,18 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from model import make_model
 from label_smoothing import LabelSmoothing
 from batch import Batch
-from get_quantized_model import get_quantized
-
+import torchtext
 import nltk
+import onnxruntime as ort
+ort.set_default_logger_severity(3)
+import numpy as np
+#from onnx_inference_legacy import run_module
+from onnx_optimized_inference import run_module
+#from onnx_inference import run_module
+import copy
+from qonnx.core.modelwrapper import ModelWrapper
+import onnx.numpy_helper as numpy_helper
+from onnx.shape_inference import infer_shapes
 
 # Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
@@ -327,7 +336,7 @@ def create_dataloaders(
     spacy_de,
     spacy_en,
     batch_size=12000,
-    max_padding=128,
+    max_padding=72,
     is_distributed=True,
 ):
     # def create_dataloaders(batch_size=12000):
@@ -402,6 +411,7 @@ def train_worker(
     d_model = 512
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     #model.cuda(gpu)
+    module = model
     is_main_process = True
     if is_distributed:
         dist.init_process_group(
@@ -525,9 +535,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        print("SINI")
-        greedy_decode(model, rb.src, rb.src_mask, 64, 0)[0]
-        print("SONO")
+        greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
         src_tokens = [
             vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
@@ -544,7 +552,7 @@ def check_outputs(
             "Target Text (Ground Truth) : "
             + " ".join(tgt_tokens).replace("\n", "")
         )
-        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0)[0]
+        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
         model_txt = (
             " ".join(
                 [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
@@ -601,17 +609,14 @@ def run_model_example(n_examples=5):
         spacy_en,
         batch_size=1,
         is_distributed=False,
-        max_padding=72,
     )
 
     print("Loading Trained Model ...")
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
-    model = get_quantized(model)
     model.load_state_dict(
         torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu"))
     )
-    model.eval()
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
@@ -619,55 +624,81 @@ def run_model_example(n_examples=5):
     )
     return model, example_data
 
-def load_vocab():
-    if not exists("vocab.pt"):
-        print("ERROR")
-        exit()
-    else:
-        vocab_src, vocab_tgt = torch.load("vocab.pt")
-    print("Finished.\nVocabulary sizes:")
-    print(len(vocab_src))
-    print(len(vocab_tgt))
-    return vocab_src, vocab_tgt
+def get_weight_dict(module_path):
+    module = ModelWrapper(module_path)
+    module_graph = module.graph
+    module_weights = module.graph.initializer
+    module_weight_dict = {}
+    for weight in module_weights:
+        module_weight_dict[weight.name] = numpy_helper.to_array(weight)
+    return module_graph, module_weight_dict
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
-    print("SRC")
-    print(src.shape)
-    vocab_src, vocab_tgt = load_vocab()
-    model.eval()
-    memory = model.encode(src, src_mask)
-    model.export_encoder(src, src_mask, "./try/encoder_try.onnx")
-    ys = torch.zeros(1, 71).fill_(start_symbol).type_as(src.data)
+def prepare_inference(module_path, module_input_values):
+    module = ModelWrapper(module_path)
+    output = [node.name for node in module.graph.output]
+
+    input_all = [node.name for node in module.graph.input]
+    input_initializers = [node.name for node in module.graph.initializer]
+    module_input_names = list(set(input_all) - set(input_initializers))
+
+    module_graph, module_weight_dict = get_weight_dict(module_path)
+
+    for input_name in module_input_names:
+        module_weight_dict[input_name] = module_input_values[input_name]
+
+    return module_weight_dict, module_graph
+
+def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False):
+
+    src_float = model.get_src_embed(src)
+    print(src_float.shape)
+    print(src_mask.shape)
+    encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
+    print("WEIGHT DICT:")
+    print(encoder_weight_dict.keys())
+    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph)
+    memory = torch.from_numpy(memory[list(memory.keys())[0]])
+    ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+
+    import time
+    decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
+
     for i in range(max_len - 1):
-        """
-        print("--")
-        print("MAX LEN:")
-        print(max_len)
-        print("MEMORY:")
-        print(memory.dtype)
-        print(memory.shape)
-        print("SRC MASK:")
-        print(src_mask.dtype)
-        print(src_mask.shape)
-        print("YS:")
-        print(ys.dtype)
-        print(ys.shape)
-        print("SUB MASK:")
-        print(subsequent_mask(ys.size(1)).type_as(src.data).dtype)
-        print(subsequent_mask(ys.size(1)).type_as(src.data).shape)
-        print("--")
-        """
-        model.export_decoder(memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data), "./try/decoder_try.onnx")
-        exit()
-        out = model.decode(
-            memory, src_mask, ys, subsequent_mask(ys.size(1)).type_as(src.data)
-        )
+        print(str(i) + "/" + str(max_len-1))
+        ys_float = model.get_tgt_embed(ys)
+        
+        # I want to speed up inference for decoder
+        # - Individual inference is fast 
+        # - but the switching between inferences take too long
+
+        start_time = time.time()
+        if custom_decoder:
+            current_decoder_graph = copy.deepcopy(decoder_graph)
+            out, _ = run_module("decoder", {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph)
+            out = torch.from_numpy(out[list(out.keys())[0]])
+            del current_decoder_graph
+        else:
+            ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
+            out = torch.from_numpy(ort_sess_decoder.run(None, {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            })[0])
+        print(time.time() - start_time)
+
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
         ys = torch.cat(
             [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
         )
+
     return ys
 
 def subsequent_mask(size):
@@ -683,7 +714,7 @@ def subsequent_mask(size):
 
 def load_trained_model():
     config = {
-        "batch_size": 1,
+        "batch_size": 32,
         "distributed": False,
         "num_epochs": 8,
         "accum_iter": 10,
