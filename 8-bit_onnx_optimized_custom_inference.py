@@ -543,55 +543,54 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        for inject_fault in [False, True]:
-            greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
+        greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
-            src_tokens = [
-                vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
-            ]
-            tgt_tokens = [
-                vocab_tgt.get_itos()[x] for x in rb.tgt[0] if x != pad_idx
-            ]
+        src_tokens = [
+            vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
+        ]
+        tgt_tokens = [
+            vocab_tgt.get_itos()[x] for x in rb.tgt[0] if x != pad_idx
+        ]
 
-            print(
-                "Source Text (Input)        : "
-                + " ".join(src_tokens).replace("\n", "")
-            )
-            print(
-                "Target Text (Ground Truth) : "
-                + " ".join(tgt_tokens).replace("\n", "")
-            )
+        print(
+            "Source Text (Input)        : "
+            + " ".join(src_tokens).replace("\n", "")
+        )
+        print(
+            "Target Text (Ground Truth) : "
+            + " ".join(tgt_tokens).replace("\n", "")
+        )
 
-            print("\nExample %d ========\n" % idx)
-            model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
-            model_txt = (
-                " ".join(
-                    [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
-                ).split(eos_string, 1)[0]
-                + eos_string
-            )
+        print("\nExample %d ========\n" % idx)
+        model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
+        model_txt = (
+            " ".join(
+                [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
+            ).split(eos_string, 1)[0]
+            + eos_string
+        )
 
-            tgt_tokens = " ".join(tgt_tokens).replace("\n", "")
-            print("LIST:")
-            output_target = tgt_tokens
-            output_target = fix_sentence(output_target)
-            output_target = output_target[:-1]
-            reference_text.append([output_target])
-            print(output_target)
+        tgt_tokens = " ".join(tgt_tokens).replace("\n", "")
+        print("LIST:")
+        output_target = tgt_tokens
+        output_target = fix_sentence(output_target)
+        output_target = output_target[:-1]
+        reference_text.append([output_target])
+        print(output_target)
 
-            print("LIST:")
-            output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
-            end_index = (output_list.index("</s>"))
-            output_list = output_list[1:end_index]
-            output_string = (" ".join(output_list))
-            output_list = fix_sentence(output_string)
-            output_text.append(output_list)
-            print(output_list)
+        print("LIST:")
+        output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
+        end_index = (output_list.index("</s>"))
+        output_list = output_list[1:end_index]
+        output_string = (" ".join(output_list))
+        output_list = fix_sentence(output_string)
+        output_text.append(output_list)
+        print(output_list)
 
-            print("Model Output               : " + model_txt.replace("\n", ""))
-            print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list))
-            results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
-    print("CORPUS BLEU:")
+        print("Model Output               : " + model_txt.replace("\n", ""))
+        print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list))
+        results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
+        print("CORPUS BLEU:")
     print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
     return results
 
