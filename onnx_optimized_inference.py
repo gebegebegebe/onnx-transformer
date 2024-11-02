@@ -47,10 +47,12 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
             continue
         input_dict[node_iter.name] = weight_dict[node_iter.name]
 
+    """
     print("--")
     print(node.name)
     print(node)
     print(input_dict.keys())
+    """
     output_tensors = execute_onnx(model, input_dict)
     tensor_output_name = list(output_tensors.keys())[0]
     original_tensor_output = output_tensors[tensor_output_name]

@@ -651,17 +651,28 @@ def prepare_inference(module_path, module_input_values):
 def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False):
 
     src_float = model.get_src_embed(src)
+    """
     print(src_float.shape)
     print(src_mask.shape)
+    """
     encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
+    """
     print("WEIGHT DICT:")
     print(encoder_weight_dict.keys())
+    """
     memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
     import time
-    decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
+    ys_float = model.get_tgt_embed(ys)
+    decoder_weight_dict, decoder_graph = prepare_inference("./try/decoder_try_cleaned.onnx", {
+            "global_in": ys_float.detach().numpy(),
+            "global_in_1": memory.detach().numpy(),
+            "global_in_2": src_mask.detach().numpy(),
+            "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+    })
+    #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
