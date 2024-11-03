@@ -1,8 +1,0 @@
-{
-	"target_layer"		: "MatMul_0",
-	"input_tensor"		: "Clip_36_out0",
-	"weight_tensor"		: "Clip_0_out0",
-	"bias_tensor"		: "None",
-	"output_tensor"		: "MatMul_0_out0",
-	"model_name"		: "./onnx/new_fixed/encoder_fixed.onnx"
-}

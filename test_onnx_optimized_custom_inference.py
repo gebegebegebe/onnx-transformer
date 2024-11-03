@@ -42,6 +42,16 @@ warnings.filterwarnings("ignore")
 RUN_EXAMPLES = True
 # Some convenience helper functions used throughout the notebook
 
+import argparse
+parser = argparse.ArgumentParser('Fault Injection Program')
+parser.add_argument('--directory_name')
+parser.add_argument('--module')
+args = parser.parse_args()
+import json
+
+from inject_utils.layers import *
+from inject_utils.utils import *
+
 class TrainState:
     """Track number of steps, examples, and tokens processed"""
 
@@ -514,8 +524,6 @@ def train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
             0, 1, vocab_src, vocab_tgt, spacy_de, spacy_en, config, False
         )
 
-# Batas suci
-
 def fix_sentence(output_target):
     output_target = output_target.replace("@@ ","")
     output_target = output_target.replace("<s> ","")
@@ -529,6 +537,7 @@ def check_outputs(
     model,
     vocab_src,
     vocab_tgt,
+    inject_parameters,
     n_examples=15,
     pad_idx=2,
     eos_string="</s>",
@@ -596,7 +605,7 @@ def check_outputs(
     return results
 
 
-def run_model_example(n_examples=5):
+def run_model_example(model_path, inject_parameters, n_examples=5):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
 
     print("Preparing Data ...")
@@ -614,12 +623,12 @@ def run_model_example(n_examples=5):
 
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
-        torch.load("checkpoint/iwslt14_model_final.pt", map_location=torch.device("cpu"))
+        torch.load(model_path, map_location=torch.device("cpu"))
     )
 
     print("Checking Model Outputs:")
     example_data = check_outputs(
-        valid_dataloader, model, vocab_src, vocab_tgt, n_examples=n_examples
+        valid_dataloader, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
     )
     return model, example_data
 
@@ -655,6 +664,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     print(src_mask.shape)
     """
     encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
+    torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
     """
     print("WEIGHT DICT:")
     print(encoder_weight_dict.keys())
@@ -671,6 +681,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             "global_in_2": src_mask.detach().numpy(),
             "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
     })
+    torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
     #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
@@ -711,6 +722,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
     return ys
 
+
 def subsequent_mask(size):
     "Mask out subsequent positions."
     attn_shape = (1, size, size)
@@ -719,26 +731,57 @@ def subsequent_mask(size):
     )
     return subsequent_mask == 0
 
-# End suci
-
 
 def load_trained_model():
-    config = {
-        "batch_size": 32,
-        "distributed": False,
-        "num_epochs": 8,
-        "accum_iter": 10,
-        "base_lr": 1.0,
-        "max_padding": 72,
-        "warmup": 3000,
-        "file_prefix": "multi30k_model_",
-    }
-    #model_path = "multi30k_model_final.pt"
     model_path = "checkpoint/iwslt14_model_final.pt"
-    if not exists(model_path):
-        train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config)
-    else:
-        run_model_example()
+
+    module = str(args.module)
+    directory_name = str(args.directory_name)
+    directory_list = os.listdir(directory_name)
+    bit_width = 8
+
+    weight_dict, main_graph = torch.load("weights/encoder.pt")
+
+    for layer in directory_list:
+        for fault_model in ["INPUT"]:
+            for bit_position in range(8):
+                input_inject_data = json.load(open(directory_name + "/" + layer))
+                faulty_bit_position = None
+                if "RANDOM" not in fault_model:
+                    faulty_bit_position = int(bit_position)
+                print(input_inject_data)
+
+                (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, (input_trace, weight_trace) = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
+                original_weight_dict = weight_dict.copy()
+
+                faulty_quantizer_name = None
+                faulty_tensor_name = None
+                if "INPUT" in fault_model:
+                    faulty_trace = input_trace
+                    faulty_tensor_name = int_input_tensor_name
+                elif "WEIGHT" in fault_model:
+                    faulty_trace = weight_trace
+                    faulty_tensor_name = int_weight_tensor_name
+                elif "RANDOM" in fault_model:
+                    faulty_trace = None
+                    faulty_tensor_name = input_inject_data["output_tensor"]
+
+                inject_parameters = {}
+                inject_parameters["original_weight_dict"] = original_weight_dict
+                inject_parameters["main_graph"] = copy.deepcopy(main_graph)
+                inject_parameters["inject_type"] = fault_model
+                inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
+                inject_parameters["faulty_trace"] = faulty_trace
+                inject_parameters["faulty_bit_position"] = faulty_bit_position
+                inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
+                inject_parameters["targetted_module"] = input_inject_data["module"] 
+                #run_model_example(model_path, inject_parameters, 1)
+
+                print(inject_parameters)
+                exit()
+
+
+    run_model_example()
 
 
 if is_interactive_notebook():

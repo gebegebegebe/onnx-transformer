@@ -128,34 +128,19 @@ def perturb_matmul(model, input_dict, weight_dict, input_tensor_name, transposed
             targetted_axes = list(transposed_axes.attribute[0].ints)
             input_tensor_name = transposed_axes.output[0]
             weight_dict["delta_4d"] = np.transpose(weight_dict["delta_4d"], tuple(targetted_axes))
-
-    """
-    print("ORIGINAL:")
-    print(input_tensor_name)
-    """
-    """
-    print("TRANSFORMED:")
-    print(input_tensor_name)
-    print("DELTA:")
-    print(weight_dict["delta_4d"])
-    print(np.nonzero(weight_dict["delta_4d"]))
-    """
-    """
-    print("DELTA TRANSFORMED:")
-    print(weight_dict["delta_4d"])
-    print(np.nonzero(weight_dict["delta_4d"]))
-    """
     input_dict[input_tensor_name] = weight_dict["delta_4d"]
-
     delta_perturb = execute_onnx(model, input_dict)
     delta_perturb = delta_perturb[list(delta_perturb.keys())[0]]
 
-    """
-    print(np.nonzero(delta_perturb))
-    print("NONZERO INITIAL")
-    print(np.nonzero(weight_dict["delta_4d"]))
-    print("NONZERO PERTURBED")
-    print(np.nonzero(delta_perturb))
-    exit()
-    """
     return delta_perturb
+
+"""
+def get_perturbation(golden_value, bit_position=None, fault_model=None):
+    golden_value = np.int8(golden_value)
+    if fault_model == "RANDOM":
+        for _ in range(32):
+            inj_bin += str(np.random.randint(0,2))
+        perturb = bin2fp16(inj_bin) - golden_value
+    else:
+        flipped_value = flip_int8_bit(golden_value, bit_position)
+"""

@@ -141,7 +141,6 @@ def run_module(module, input_values, module_filepath, module_weight_dict, module
 
     return inference(module_graph, module_weight_dict, module)
 
-"""
 if __name__ == "__main__":
     module = "encoder"
     encoder_input_values = {
@@ -151,8 +150,8 @@ if __name__ == "__main__":
     output_tensors, module_weight_dict = run_module(module, encoder_input_values, module_filepath)
     torch.save(module_weight_dict, "encoder.pt")
 
-    #print("ENCODER OUT:")
-    #print(output_tensors)
+    print("ENCODER OUT:")
+    print(output_tensors)
 
     module = "decoder"
     decoder_input_values = {
@@ -165,6 +164,5 @@ if __name__ == "__main__":
     output_tensors, module_weight_dict = run_module(module, decoder_input_values, module_filepath)
     torch.save(module_weight_dict, "decoder.pt")
 
-    #print("DECODER OUT:")
-    #print(output_tensors)
-"""
+    print("DECODER OUT:")
+    print(output_tensors)

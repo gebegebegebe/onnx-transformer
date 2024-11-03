@@ -197,6 +197,18 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
                     if "out0" in input_tensor:
                         int_input_tensor_name = input_tensor
                         break
+                intermediate_operation_names = []
+                intermediate_operation_names.append(quantizer_input_node.name)
+                temporary_output_name = quantizer_input_node.output[0]
+                for outer_node in graph.node:
+                    if intermediate_operation_names[-1] == layer_name:
+                        break
+                    for inner_input_node in outer_node.input:
+                        if temporary_output_name == inner_input_node:
+                            intermediate_operation_names.append(outer_node.name)
+                            temporary_output_name = outer_node.output[0]
+                input_intermediate_operations = intermediate_operation_names
+
             if input_node == weight_name:
                 weight_quantizer_name = node.name
                 quantizer_weight_node = node
@@ -204,27 +216,30 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
                     if "out0" in input_tensor:
                         int_weight_tensor_name = input_tensor
                         break
+                intermediate_operation_names = []
+                intermediate_operation_names.append(quantizer_weight_node.name)
+                temporary_output_name = quantizer_weight_node.output[0]
+                for outer_node in graph.node:
+                    if intermediate_operation_names[-1] == layer_name:
+                        break
+                    for inner_input_node in outer_node.input:
+                        if temporary_output_name == inner_input_node:
+                            intermediate_operation_names.append(outer_node.name)
+                            temporary_output_name = outer_node.output[0]
+                weight_intermediate_operations = intermediate_operation_names
 
-    if transposed_output_name:
-        for node in graph.node:
-            if (node.output[0]) in transposed_output_name:
-                transposed_node = node
-                #transposed_axes = list(node.attribute[0].ints)
-                break
+    print(input_intermediate_operations)
+    print(weight_intermediate_operations)
 
     check_1 = (int_input_tensor_name in quantizer_input_node.input) and (int_weight_tensor_name in quantizer_weight_node.input)
     check_2 = output_tensor in layer_node.output
 
-    print("NODE:")
-    print(transposed_node.name)
-    print("TRANSPOSED:")
-    print(transposed_output_name)
     if not (check_1 and check_2):
         print(check_1)
         print(check_2)
         print(input_name, weight_name, bias_name)
         exit()
-    return (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), (bias_quantizer_name, int_bias_tensor_name), transposed_node
+    return (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), (bias_quantizer_name, int_bias_tensor_name), (input_intermediate_operations, weight_intermediate_operations)
 
 def expand_node_inputs_outputs(graph, node):
     added_inputs = []
