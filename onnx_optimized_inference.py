@@ -11,7 +11,14 @@ from onnx.shape_inference import infer_shapes
 import time
 import copy
 
-def execute_node(node, main_graph, final_output_node, weight_dict, module):
+def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_parameters=None):
+    """
+    if inject_parameters:
+        print("IN EXECUTE NODE:")
+        print(inject_parameters)
+        print(module)
+        exit()
+    """
     node_inputs = []
     node_outputs = []
 
@@ -58,12 +65,35 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module):
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
+    if inject_parameters and inject_parameters["targetted_module"] == module:
+        faulty_operation = inject_parameters["faulty_trace"][0]
+        if node.name == faulty_operation:
+            if inject_parameters["faulty_trace"][0] == inject_parameters["faulty_operation_name"]:
+                assert(len(inject_parameters["faulty_trace"]) == 1)
+                # TODO: Implement fault models (INPUT/WEIGHT/INPUT16/WEIGHT16/RANDOM/RANDOM_BITFLIP) here
+                print("FOUND!")
+                print(node.name)
+                print(inject_parameters["faulty_trace"][0])
+                exit()
+            if inject_parameters["faulty_tensor_name"] in node.input:
+                # TODO: Perturb goes here
+                assert(inject_parameters["faulty_quantizer_name"] == inject_parameters["faulty_trace"][0])
+                print("FOUND! First node")
+                print(node)
+                print(inject_parameters["faulty_tensor_name"])
+            # TODO: Perform inference for fault faulty values
+            print("FOUND!")
+            print(node.name)
+            print(inject_parameters["faulty_trace"][0])
+            inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
+            print(inject_parameters["faulty_trace"])
+
     return output_tensors, weight_dict, list_operation_time
 
-def inference(main_graph, weight_dict, module):
+def inference(main_graph, weight_dict, module, inject_parameters=None):
     def execute_single_node(node, weight_dict, main_graph, module):
         final_output_node = node.output[0]
-        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module)
+        output_tensors, weight_dict, list_operation_time = execute_node(node, main_graph, final_output_node, weight_dict, module, inject_parameters)
         return output_tensors, weight_dict, list_operation_time
     output_tensors = None
     for node in main_graph.node:
@@ -132,14 +162,14 @@ def prepare_inference(module_path, module_input_values):
 
     return module_weight_dict, module_graph
 
-def run_module(module, input_values, module_filepath, module_weight_dict, module_graph):
+def run_module(module, input_values, module_filepath, module_weight_dict, module_graph, inject_parameters=None):
     #module_weight_dict, module_graph = prepare_inference(module_filepath, input_values)
-    start_time = time.time()
+    #start_time = time.time()
     for input_name in list(input_values.keys()):
         module_weight_dict[input_name] = input_values[input_name]
-    print("LOAD TIME: " + str(time.time() - start_time))
+    #print("LOAD TIME: " + str(time.time() - start_time))
 
-    return inference(module_graph, module_weight_dict, module)
+    return inference(module_graph, module_weight_dict, module, inject_parameters)
 
 if __name__ == "__main__":
     module = "encoder"

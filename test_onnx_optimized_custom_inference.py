@@ -552,7 +552,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        for inject_fault in [False, True]:
+        for inject_fault in [True, False]:
             greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
             src_tokens = [
@@ -572,7 +572,10 @@ def check_outputs(
             )
 
             print("\nExample %d ========\n" % idx)
-            model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
+            if inject_fault:
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters)[0]
+            else:
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
             model_txt = (
                 " ".join(
                     [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
@@ -656,20 +659,11 @@ def prepare_inference(module_path, module_input_values):
 
     return module_weight_dict, module_graph
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False):
-
+def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False, inject_parameters=None):
     src_float = model.get_src_embed(src)
-    """
-    print(src_float.shape)
-    print(src_mask.shape)
-    """
     encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
-    torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
-    """
-    print("WEIGHT DICT:")
-    print(encoder_weight_dict.keys())
-    """
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph)
+    #torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
+    memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -681,7 +675,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             "global_in_2": src_mask.detach().numpy(),
             "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
     })
-    torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
+    #torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
     #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
@@ -695,12 +689,12 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         start_time = time.time()
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
-            out, _ = run_module("decoder", {
+            out, _ = run_module("Decoder", {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-            }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph)
+            }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, inject_parameters)
             out = torch.from_numpy(out[list(out.keys())[0]])
             del current_decoder_graph
         else:
@@ -758,12 +752,15 @@ def load_trained_model():
                 faulty_tensor_name = None
                 if "INPUT" in fault_model:
                     faulty_trace = input_trace
+                    faulty_quantizer_name = input_quantizer_name
                     faulty_tensor_name = int_input_tensor_name
                 elif "WEIGHT" in fault_model:
                     faulty_trace = weight_trace
+                    faulty_quantizer_name = weight_quantizer_name
                     faulty_tensor_name = int_weight_tensor_name
                 elif "RANDOM" in fault_model:
                     faulty_trace = None
+                    faulty_quantizer = None
                     faulty_tensor_name = input_inject_data["output_tensor"]
 
                 inject_parameters = {}
@@ -771,13 +768,13 @@ def load_trained_model():
                 inject_parameters["main_graph"] = copy.deepcopy(main_graph)
                 inject_parameters["inject_type"] = fault_model
                 inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
+                inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
                 inject_parameters["faulty_trace"] = faulty_trace
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
-                #run_model_example(model_path, inject_parameters, 1)
+                run_model_example(model_path, inject_parameters, 1)
 
-                print(inject_parameters)
                 exit()
 
 
