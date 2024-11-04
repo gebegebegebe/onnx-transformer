@@ -36,7 +36,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     )
 
     model = ModelProto()
-    model = infer_shapes(model, data_prop=True)
+    model = infer_shapes(model)
     model.graph.CopyFrom(graph)
     model.opset_import.append(OperatorSetIdProto(version=13))
     model = ModelWrapper(model)
@@ -54,7 +54,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
-    if inject_parameters and inject_parameters["targetted_module"] == module and node.name == inject_parameters["faulty_trace"][0]:
+    if inject_parameters and inject_parameters["targetted_module"] == module and inject_parameters["faulty_trace"] and node.name == inject_parameters["faulty_trace"][0]:
         faulty_operation = inject_parameters["faulty_trace"][0]
 
         # First layer in faulty_trace, obtains perturbations
@@ -78,11 +78,9 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
         # Final layer in faulty_trace, should be the target layer and applies the fault models
         if faulty_operation == inject_parameters["faulty_operation_name"]:
             assert(len(inject_parameters["faulty_trace"]) == 1)
-            # TODO: Implement fault models (INPUT/WEIGHT/INPUT16/WEIGHT16/RANDOM/RANDOM_BITFLIP) here
-            print("FOUND! Last node")
-            print(inject_parameters["faulty_trace"])
-            print(np.nonzero(weight_dict["delta_4d"]))
-            exit()
+            temp_variable = (np.add(weight_dict[tensor_output_name], weight_dict["delta_4d"]))
+            weight_dict[tensor_output_name] = temp_variable
+            print("FAULT INJECTED!")
         inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
 
     return output_tensors, weight_dict, list_operation_time
@@ -116,7 +114,7 @@ def expand_node_inputs_outputs(graph, node, weight_dict, module):
             added_inputs[-1].name = added_inputs[-1].name[:-1] + "2"
             weight_dict[added_inputs[-1].name] = np.array(3.4e38, dtype=np.float32)
 
-    if module == "decoder":
+    if module == "Decoder":
         replacement_dictionary = {
             "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
             "onnx::Unsqueeze_3_dynamic_axes_1": weight_dict["global_in_3"].shape[1],

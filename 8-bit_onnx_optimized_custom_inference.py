@@ -681,6 +681,16 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         # - but the switching between inferences take too long
 
         start_time = time.time()
+        print("MEMORY SHAPE:")
+        print(memory.shape)
+        print(src_float.detach().numpy().shape)
+        print(src_mask.detach().numpy().shape)
+        print("--")
+        print(ys_float.detach().numpy().shape)
+        print(memory.detach().numpy().shape)
+        print(src_mask.detach().numpy().shape)
+        print(subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy())
+
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
             out, _ = run_module("decoder", {

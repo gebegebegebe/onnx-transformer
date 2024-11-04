@@ -552,7 +552,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        for inject_fault in [True, False]:
+        for inject_fault in [False, True]:
             greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
             src_tokens = [
@@ -575,7 +575,7 @@ def check_outputs(
             if inject_fault:
                 model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters)[0]
             else:
-                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True)[0]
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, None)[0]
             model_txt = (
                 " ".join(
                     [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
