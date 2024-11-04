@@ -7,18 +7,13 @@ import torch
 import onnx
 
 from onnx.shape_inference import infer_shapes
+from inject_utils.layers import int_bit_flip
+from inject_utils.layers import perturb_quantizer
 
 import time
 import copy
 
 def execute_node(node, main_graph, final_output_node, weight_dict, module, inject_parameters=None):
-    """
-    if inject_parameters:
-        print("IN EXECUTE NODE:")
-        print(inject_parameters)
-        print(module)
-        exit()
-    """
     node_inputs = []
     node_outputs = []
 
@@ -54,12 +49,6 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             continue
         input_dict[node_iter.name] = weight_dict[node_iter.name]
 
-    """
-    print("--")
-    print(node.name)
-    print(node)
-    print(input_dict.keys())
-    """
     output_tensors = execute_onnx(model, input_dict)
     tensor_output_name = list(output_tensors.keys())[0]
     original_tensor_output = output_tensors[tensor_output_name]
@@ -68,25 +57,46 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     if inject_parameters and inject_parameters["targetted_module"] == module:
         faulty_operation = inject_parameters["faulty_trace"][0]
         if node.name == faulty_operation:
-            if inject_parameters["faulty_trace"][0] == inject_parameters["faulty_operation_name"]:
+            # Final layer in faulty_trace, should be the target layer and applies the fault models
+            if faulty_operation == inject_parameters["faulty_operation_name"]:
                 assert(len(inject_parameters["faulty_trace"]) == 1)
                 # TODO: Implement fault models (INPUT/WEIGHT/INPUT16/WEIGHT16/RANDOM/RANDOM_BITFLIP) here
-                print("FOUND!")
-                print(node.name)
-                print(inject_parameters["faulty_trace"][0])
+                print("FOUND! Last node")
+                print(inject_parameters["faulty_trace"])
                 exit()
-            if inject_parameters["faulty_tensor_name"] in node.input:
-                # TODO: Perturb goes here
+            # First layer in faulty_trace, obtains perturbations
+            elif inject_parameters["faulty_tensor_name"] in node.input:
                 assert(inject_parameters["faulty_quantizer_name"] == inject_parameters["faulty_trace"][0])
-                print("FOUND! First node")
+
+                # TODO: Perturb goes here
+                """
+                faulty_value, target_indices = int_bit_flip(weight_dict, inject_parameters["faulty_tensor_name"], inject_parameters["faulty_bit_position"], 8)
+                print("FAULTY VALUE:")
+                weight_dict[inject_parameters["faulty_tensor_name"]][tuple(target_indices)] = np.float32(faulty_value)
+                print(weight_dict[inject_parameters["faulty_tensor_name"]][tuple(target_indices)])
+                exit()
+                """
+                weight_dict = perturb_quantizer(model, input_dict, weight_dict, inject_parameters["faulty_tensor_name"], inject_parameters["faulty_bit_position"])
+                """
+                print("FINALE:")
+                print(weight_dict["delta_4d"])
+                print(np.nonzero(weight_dict["delta_4d"]))
+                print(type(np.nonzero(weight_dict["delta_4d"])))
+                print(tuple(np.concatenate(np.nonzero(weight_dict["delta_4d"]))))
+                """
+                print("--")
+                print(node.name)
                 print(node)
-                print(inject_parameters["faulty_tensor_name"])
-            # TODO: Perform inference for fault faulty values
-            print("FOUND!")
-            print(node.name)
-            print(inject_parameters["faulty_trace"][0])
-            inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
-            print(inject_parameters["faulty_trace"])
+                print(weight_dict["delta_4d"][tuple(np.concatenate(np.nonzero(weight_dict["delta_4d"])))])
+                exit()
+
+                inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
+            # Rest of the layers in faulty_trace
+            else:
+                # TODO: Perform inference for faulty values
+                print("FOUND! Intermediate node")
+                inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
+                print(inject_parameters["faulty_trace"])
 
     return output_tensors, weight_dict, list_operation_time
 

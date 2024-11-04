@@ -1,6 +1,6 @@
 from onnx import helper, ModelProto, TensorProto, OperatorSetIdProto, shape_inference
 from finn.core.onnx_exec import execute_onnx
-from inject_utils.utils import *
+#from inject_utils.utils import *
 import numpy as np
 
 def float32_bit_flip(faulty_tensor, target_indices):
@@ -27,8 +27,6 @@ def float16_bit_flip(faulty_tensor, target_indices, bit_position=None):
     faulty_value = bin2fp16(inject_string)
     return faulty_value, flip_bit
 
-# TODO: Clarify in previous attempt that I made a special case for INT4 due to calculations mainly being done in INT8
-
 def flip_int4_bit(value, bit_position):
     mask = 1 << bit_position
     flipped_value = value ^ mask
@@ -53,22 +51,22 @@ def flip_int8_bit(value, bit_position):
 
 def int_bit_flip(input_dict, target_tensor, target_bit_position, bit_precision=4):
     faulty_tensor = input_dict[target_tensor]
+    faulty_tensor = np.int8(faulty_tensor)
     random_indices = [np.random.randint(0, dim) for dim in faulty_tensor.shape]
-    """
-    faulty_bit = 2**target_bit_position
-    golden_value = (faulty_tensor[tuple(random_indices)])
-    faulty_value = faulty_tensor[tuple(random_indices)] ^ faulty_bit
-    """
-    """
+    print("ORIGINAL VALUE:")
+    print(faulty_tensor[tuple(random_indices)])
     faulty_value = flip_int8_bit(faulty_tensor[tuple(random_indices)], target_bit_position)
     assert faulty_value >= -128 and faulty_value <= 127
     """
     faulty_value = flip_int4_bit(faulty_tensor[tuple(random_indices)], target_bit_position)
     assert faulty_value >= -8 and faulty_value <= 7
+    """
     return faulty_value, random_indices
 
 def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
     faulty_value, target_indices = int_bit_flip(weight_dict, faulty_tensor_name, faulty_bit_position, 4)
+    print("FAULTY VALUE:")
+    print(faulty_value)
     golden_value = weight_dict[faulty_tensor_name][tuple(target_indices)]
     is_signed = ""
     if isinstance(golden_value, np.uint8):
@@ -90,7 +88,7 @@ def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty
     weight_dict["delta_4d"][tuple(target_indices)] = perturb
 
     #debug(faulty_value, golden_value, weight_dict, target_indices, input_dict, faulty_tensor_name, output_tensors, original_tensor_value, dequantized_result_tensor_name, perturb)
-    return weight_dict, dequantized_result_tensor_name, target_indices, golden_value, faulty_value, is_signed
+    return weight_dict#, dequantized_result_tensor_name, target_indices, golden_value, faulty_value, is_signed
 
 def perturb_fp16(model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
     target_indices = [np.random.randint(0, dim) for dim in weight_dict[faulty_tensor_name].shape]
