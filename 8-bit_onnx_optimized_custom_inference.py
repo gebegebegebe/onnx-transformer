@@ -658,7 +658,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     print("WEIGHT DICT:")
     print(encoder_weight_dict.keys())
     """
-    memory, _ = run_module("encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph)
+    memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph)
     memory = torch.from_numpy(memory[list(memory.keys())[0]])
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -681,6 +681,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         # - but the switching between inferences take too long
 
         start_time = time.time()
+        """
         print("MEMORY SHAPE:")
         print(memory.shape)
         print(src_float.detach().numpy().shape)
@@ -690,10 +691,11 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         print(memory.detach().numpy().shape)
         print(src_mask.detach().numpy().shape)
         print(subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy())
+        """
 
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
-            out, _ = run_module("decoder", {
+            out, _ = run_module("Decoder", {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
                 "global_in_2": src_mask.detach().numpy(),
