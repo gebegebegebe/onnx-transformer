@@ -81,10 +81,15 @@ def int_bit_flip(input_dict, target_tensor, target_bit_position, bit_precision=4
     """
     return faulty_value, random_indices
 
-def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
+
+def perturb_quantizer(graph, node, module, model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
     faulty_value, target_indices = int_bit_flip(weight_dict, faulty_tensor_name, faulty_bit_position, 4)
     print("FAULTY VALUE:")
     print(faulty_value)
+    
+    print("INPUT")
+    print(input_dict[list(input_dict.keys())[0]].shape)
+    print(input_dict[list(input_dict.keys())[1]].shape)
     golden_value = weight_dict[faulty_tensor_name][tuple(target_indices)]
     is_signed = ""
     if isinstance(golden_value, np.uint8):
@@ -97,6 +102,24 @@ def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty
     input_perturb[tuple(target_indices)] = faulty_value
     input_dict[faulty_tensor_name] = input_perturb
 
+    print("INPUT INNER:")
+    print(input_dict[list(input_dict.keys())[0]].shape)
+    print(input_dict[list(input_dict.keys())[1]].shape)
+    print("FOCUS GRAPH:")
+
+    if module == "Decoder":
+        replacement_dictionary = {
+            "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
+            "onnx::Unsqueeze_3_dynamic_axes_1": weight_dict["global_in_3"].shape[1],
+            "onnx::Unsqueeze_3_dynamic_axes_2": weight_dict["global_in_3"].shape[2],
+        }
+        for output in model.graph.output:
+            for dimension in range(len(output.type.tensor_type.shape.dim)):
+                for key in replacement_dictionary.keys():
+                    if key in str(output.type.tensor_type.shape.dim[dimension]):
+                        output.type.tensor_type.shape.dim[dimension].Clear()
+                        output.type.tensor_type.shape.dim[dimension].dim_value = replacement_dictionary[key]
+
     output_tensors = execute_onnx(model, input_dict)
     weight_dict["delta_4d"] = output_tensors[(list(output_tensors.keys())[0])]
     faulty_index_value = weight_dict["delta_4d"][tuple(target_indices)]
@@ -105,8 +128,8 @@ def perturb_quantizer(model, input_dict, weight_dict, faulty_tensor_name, faulty
     perturb = weight_dict["delta_4d"][tuple(target_indices)] - weight_dict[dequantized_result_tensor_name][tuple(target_indices)]
     weight_dict["delta_4d"][tuple(target_indices)] = perturb
 
-    #debug(faulty_value, golden_value, weight_dict, target_indices, input_dict, faulty_tensor_name, output_tensors, original_tensor_value, dequantized_result_tensor_name, perturb)
     return weight_dict#, dequantized_result_tensor_name, target_indices, golden_value, faulty_value, is_signed
+
 
 def perturb_fp16(model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
     target_indices = [np.random.randint(0, dim) for dim in weight_dict[faulty_tensor_name].shape]

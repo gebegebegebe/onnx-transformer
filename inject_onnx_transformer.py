@@ -737,7 +737,7 @@ def load_trained_model():
     weight_dict, main_graph = torch.load("weights/encoder.pt")
 
     for layer in directory_list:
-        for fault_model in ["INPUT"]:
+        for fault_model in ["RANDOM"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
@@ -773,6 +773,7 @@ def load_trained_model():
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
+
                 run_model_example(model_path, inject_parameters, 1)
 
                 exit()

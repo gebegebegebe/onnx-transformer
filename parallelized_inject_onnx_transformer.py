@@ -39,7 +39,6 @@ from onnx.shape_inference import infer_shapes
 from multiprocessing import Pool
 from functools import partial
 
-
 # Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
 RUN_EXAMPLES = True
@@ -555,7 +554,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         #b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        for inject_fault in [True, False]:
+        for inject_fault in [True]:#[True, False]:
             greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
             src_tokens = [
@@ -633,7 +632,7 @@ def run_model_example(model_path, inject_parameters, n_examples=5):
 
     print("Checking Model Outputs:")
 
-    number_of_experiments = 2
+    number_of_experiments = 1
     batch = []
     for b_index in range(number_of_experiments):
         batch.append(next(iter(valid_dataloader)))
@@ -698,6 +697,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         # - Individual inference is fast 
         # - but the switching between inferences take too long
 
+
+        pass_inject_parameters = None
+        custom_decoder = False
+        if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)):
+            pass_inject_parameters = inject_parameters
+            custom_decoder = True
+
         start_time = time.time()
         if custom_decoder:
             current_decoder_graph = copy.deepcopy(decoder_graph)
@@ -706,7 +712,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_1": memory.detach().numpy(),
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-            }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, inject_parameters)
+            }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, pass_inject_parameters)
             out = torch.from_numpy(out[list(out.keys())[0]])
             del current_decoder_graph
         else:
@@ -746,10 +752,13 @@ def load_trained_model():
     directory_list = os.listdir(directory_name)
     bit_width = 8
 
-    weight_dict, main_graph = torch.load("weights/encoder.pt")
+    if module == "Encoder":
+        weight_dict, main_graph = torch.load("weights/encoder.pt")
+    else:
+        weight_dict, main_graph = torch.load("weights/decoder.pt")
 
     for layer in directory_list:
-        for fault_model in ["INPUT"]:
+        for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
@@ -758,6 +767,13 @@ def load_trained_model():
                 print(input_inject_data)
 
                 (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, (input_trace, weight_trace) = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
+
+                print("TRACES:")
+                print(input_quantizer_name)
+                print(weight_quantizer_name)
+                print(input_trace)
+                print(weight_trace)
+
                 original_weight_dict = weight_dict.copy()
 
                 faulty_quantizer_name = None
@@ -775,6 +791,9 @@ def load_trained_model():
                     faulty_quantizer = None
                     faulty_tensor_name = input_inject_data["output_tensor"]
 
+                # Target first generated token (target_inference_number)
+                target_inference_number = 5
+
                 inject_parameters = {}
                 inject_parameters["original_weight_dict"] = original_weight_dict
                 inject_parameters["main_graph"] = copy.deepcopy(main_graph)
@@ -785,6 +804,7 @@ def load_trained_model():
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
+                inject_parameters["target_inference_number"] = target_inference_number
                 run_model_example(model_path, inject_parameters, 1)
 
                 exit()

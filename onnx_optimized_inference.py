@@ -42,7 +42,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     model.graph.CopyFrom(graph)
     model.opset_import.append(OperatorSetIdProto(version=13))
     model = ModelWrapper(model)
-    
+
     input_dict = {}
     for node_iter in node_inputs:
         if node_iter.name == [node_intermediate.name for node_intermediate in intermediate_node_outputs]:
@@ -71,30 +71,25 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
         print("FAULTY:")
         print(faulty_value)
 
-        """
-        if (global_inject_fault) and (global_faulty_operation_name in node.name):
-            faulty_value = None
-            target_indices = [np.random.randint(0, dim) for dim in weight_dict[global_faulty_tensor_name].shape]
-            golden_value = weight_dict[global_faulty_tensor_name][tuple(target_indices)]
-            if "BITFLIP" in global_inject_type:
-                faulty_value, flip_bit = float32_bit_flip(weight_dict[global_faulty_tensor_name], target_indices)
-            else:
-                faulty_value = delta_init()
-            weight_dict[global_faulty_tensor_name][tuple(target_indices)] = faulty_value
-        """
-
-
     if inject_parameters and (inject_parameters["targetted_module"] == module) and (inject_parameters["faulty_trace"]) and (node.name == inject_parameters["faulty_trace"][0]) and (inject_parameters["inject_type"] in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16"]):
         faulty_operation = inject_parameters["faulty_trace"][0]
 
         # First layer in faulty_trace, obtains perturbations
         if inject_parameters["faulty_tensor_name"] in node.input:
+            print("FIRST LAYER")
+            print(faulty_operation)
             assert(inject_parameters["faulty_quantizer_name"] == inject_parameters["faulty_trace"][0])
-            weight_dict = perturb_quantizer(model, input_dict, weight_dict, inject_parameters["faulty_tensor_name"], inject_parameters["faulty_bit_position"])
+            #weight_dict = perturb_quantizer(model, input_dict, weight_dict, inject_parameters["faulty_tensor_name"], inject_parameters["faulty_bit_position"])
+            print("NODE:")
+            print(node.name)
+            weight_dict = perturb_quantizer(graph, node, module, model, input_dict, weight_dict, inject_parameters["faulty_tensor_name"], inject_parameters["faulty_bit_position"])
+            print("CHECK HERE")
             inject_parameters["intermediate_output_name"] = tensor_output_name
 
         # Rest of the layers in faulty_trace
         else:
+            print("OTHER LAYERS")
+            print(faulty_operation)
             intermediate_input_name = None
             for input_node in node.input:
                 if input_node == inject_parameters["intermediate_output_name"]:
@@ -107,10 +102,12 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
 
         # Final layer in faulty_trace, should be the target layer and applies the fault models
         if faulty_operation == inject_parameters["faulty_operation_name"]:
+            print("FINAL LAYER")
+            print(faulty_operation)
             assert(len(inject_parameters["faulty_trace"]) == 1)
             print(np.nonzero(weight_dict["delta_4d"]))
             print(weight_dict["delta_4d"].shape)
-            if "INPUT16" in inject_parameters["inject_type"]:
+            if "INPUT16" == inject_parameters["inject_type"]:
                 delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
                 random_shape = list(weight_dict["delta_4d"].shape)
                 random_shape[-1] = random_shape[-1]//16
@@ -125,7 +122,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                     start_index[-1] = start_index[-1]+1
                 weight_dict["delta_4d"] = delta_16
                 print("INPUT16")
-            elif "WEIGHT16" in inject_parameters["inject_type"]:
+            elif "WEIGHT16" == inject_parameters["inject_type"]:
                 delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
                 random_shape = list(weight_dict["delta_4d"].shape)
                 start_index = tuple([np.random.randint(i) for i in random_shape])
