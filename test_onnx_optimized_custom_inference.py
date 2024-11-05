@@ -552,7 +552,7 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        for inject_fault in [False, True]:
+        for inject_fault in [True, False]:
             greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
             src_tokens = [

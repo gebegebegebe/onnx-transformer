@@ -2,6 +2,24 @@ from onnx import helper, ModelProto, TensorProto, OperatorSetIdProto, shape_infe
 from finn.core.onnx_exec import execute_onnx
 #from inject_utils.utils import *
 import numpy as np
+import struct
+
+def fp32tobin(value):
+    return ''.join(bin(c).replace('0b', '').rjust(8, '0') for c in struct.pack('!f', value))
+
+def bin2fp32(bin_str):
+    assert len(bin_str) == 32
+    data = struct.unpack('!f',struct.pack('!I', int(bin_str, 2)))[0]
+    if np.isnan(data):
+        return 0
+    else:
+        return data
+
+def delta_init():
+    one_bin = ''
+    for _ in range(32):
+        one_bin += str(np.random.randint(0,2))
+    return bin2fp32(one_bin)
 
 def float32_bit_flip(faulty_tensor, target_indices):
     golden_value = faulty_tensor[tuple(target_indices)]

@@ -7,8 +7,10 @@ import torch
 import onnx
 
 from onnx.shape_inference import infer_shapes
-from inject_utils.layers import int_bit_flip
+#from inject_utils.layers import int_bit_flip
 from inject_utils.layers import perturb_quantizer
+from inject_utils.layers import float32_bit_flip 
+from inject_utils.layers import delta_init 
 
 import time
 import copy
@@ -54,7 +56,35 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
     original_tensor_output = output_tensors[tensor_output_name]
     weight_dict[tensor_output_name] = output_tensors[tensor_output_name]
 
-    if inject_parameters and inject_parameters["targetted_module"] == module and inject_parameters["faulty_trace"] and node.name == inject_parameters["faulty_trace"][0]:
+    if inject_parameters and ("RANDOM" in inject_parameters["inject_type"]) and (node.name == inject_parameters["faulty_operation_name"]):
+        print("FOUND HERE RANDOM:")
+        print(node.name)
+        faulty_value = None
+        target_indices = [np.random.randint(0, dim) for dim in weight_dict[tensor_output_name].shape]
+        golden_value = weight_dict[tensor_output_name][tuple(target_indices)]
+        print(weight_dict[tensor_output_name][tuple(target_indices)])
+        if "BITFLIP" in inject_parameters["inject_type"]:
+            faulty_value, flip_bit = float32_bit_flip(weight_dict[tensor_output_name], target_indices)
+        else:
+            faulty_value = delta_init()
+        weight_dict[tensor_output_name][tuple(target_indices)] = faulty_value
+        print("FAULTY:")
+        print(faulty_value)
+
+        """
+        if (global_inject_fault) and (global_faulty_operation_name in node.name):
+            faulty_value = None
+            target_indices = [np.random.randint(0, dim) for dim in weight_dict[global_faulty_tensor_name].shape]
+            golden_value = weight_dict[global_faulty_tensor_name][tuple(target_indices)]
+            if "BITFLIP" in global_inject_type:
+                faulty_value, flip_bit = float32_bit_flip(weight_dict[global_faulty_tensor_name], target_indices)
+            else:
+                faulty_value = delta_init()
+            weight_dict[global_faulty_tensor_name][tuple(target_indices)] = faulty_value
+        """
+
+
+    if inject_parameters and (inject_parameters["targetted_module"] == module) and (inject_parameters["faulty_trace"]) and (node.name == inject_parameters["faulty_trace"][0]) and (inject_parameters["inject_type"] in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16"]):
         faulty_operation = inject_parameters["faulty_trace"][0]
 
         # First layer in faulty_trace, obtains perturbations
@@ -78,9 +108,38 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
         # Final layer in faulty_trace, should be the target layer and applies the fault models
         if faulty_operation == inject_parameters["faulty_operation_name"]:
             assert(len(inject_parameters["faulty_trace"]) == 1)
+            print(np.nonzero(weight_dict["delta_4d"]))
+            print(weight_dict["delta_4d"].shape)
+            if "INPUT16" in inject_parameters["inject_type"]:
+                delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
+                random_shape = list(weight_dict["delta_4d"].shape)
+                random_shape[-1] = random_shape[-1]//16
+                start_index = [np.random.randint(i) for i in random_shape]
+                start_index[-1] = start_index[-1]*16
+                print(start_index)
+                for i in range(16):
+                    start_index = tuple(start_index)
+                    delta_16[start_index] = weight_dict["delta_4d"][start_index]
+    
+                    start_index = list(start_index)
+                    start_index[-1] = start_index[-1]+1
+                weight_dict["delta_4d"] = delta_16
+                print("INPUT16")
+            elif "WEIGHT16" in inject_parameters["inject_type"]:
+                delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
+                random_shape = list(weight_dict["delta_4d"].shape)
+                start_index = tuple([np.random.randint(i) for i in random_shape])
+                print(start_index)
+                delta_16[start_index] = weight_dict["delta_4d"][start_index]
+                weight_dict["delta_4d"] = delta_16
+                print("WEIGHT16")
+            else:
+                print("INPUTS/WEIGHTS")
+            print("FAULT INJECTED!")
+            print(np.nonzero(weight_dict["delta_4d"]))
             temp_variable = (np.add(weight_dict[tensor_output_name], weight_dict["delta_4d"]))
             weight_dict[tensor_output_name] = temp_variable
-            print("FAULT INJECTED!")
+
         inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
 
     return output_tensors, weight_dict, list_operation_time
