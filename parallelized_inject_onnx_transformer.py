@@ -554,8 +554,8 @@ def check_outputs(
         print("\nExample %d ========\n" % idx)
         #b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
+        greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
         for inject_fault in [True]:#[True, False]:
-            greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
 
             src_tokens = [
                 vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
@@ -700,7 +700,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
         pass_inject_parameters = None
         custom_decoder = False
-        if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)):
+        if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)) and (inject_parameters["targetted_module"]=="Decoder"):
             pass_inject_parameters = inject_parameters
             custom_decoder = True
 
@@ -758,7 +758,7 @@ def load_trained_model():
         weight_dict, main_graph = torch.load("weights/decoder.pt")
 
     for layer in directory_list:
-        for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+        for fault_model in ["INPUT16"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
@@ -792,6 +792,7 @@ def load_trained_model():
                     faulty_tensor_name = input_inject_data["output_tensor"]
 
                 # Target first generated token (target_inference_number)
+                # Inject i = target_inference_number, where i is the i-th token for inference
                 target_inference_number = 5
 
                 inject_parameters = {}
