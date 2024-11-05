@@ -36,6 +36,9 @@ import copy
 from qonnx.core.modelwrapper import ModelWrapper
 import onnx.numpy_helper as numpy_helper
 from onnx.shape_inference import infer_shapes
+from multiprocessing import Pool
+from functools import partial
+
 
 # Set to False to skip notebook execution (e.g. for debugging)
 warnings.filterwarnings("ignore")
@@ -533,14 +536,14 @@ def fix_sentence(output_target):
     return output_target
 
 def check_outputs(
-    valid_dataloader,
     model,
     vocab_src,
     vocab_tgt,
     inject_parameters,
-    n_examples=15,
-    pad_idx=2,
-    eos_string="</s>",
+    n_examples,
+    pad_idx,
+    eos_string,
+    b,
 ):
     #n_examples = 1
     results = [()] * n_examples
@@ -550,7 +553,7 @@ def check_outputs(
 
     for idx in range(n_examples):
         print("\nExample %d ========\n" % idx)
-        b = next(iter(valid_dataloader))
+        #b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
         for inject_fault in [True, False]:
             greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
@@ -623,16 +626,25 @@ def run_model_example(model_path, inject_parameters, n_examples=5):
     )
 
     print("Loading Trained Model ...")
-
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
         torch.load(model_path, map_location=torch.device("cpu"))
     )
 
     print("Checking Model Outputs:")
+
+    number_of_experiments = 2
+    batch = []
+    for b_index in range(number_of_experiments):
+        batch.append(next(iter(valid_dataloader)))
+    """
     example_data = check_outputs(
-        valid_dataloader, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
+        b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
     )
+    """
+
+    with Pool() as pool:
+        example_data = pool.map(partial(check_outputs, model, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in batch])
     return model, example_data
 
 def get_weight_dict(module_path):
