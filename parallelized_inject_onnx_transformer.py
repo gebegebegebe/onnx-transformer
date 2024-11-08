@@ -1,3 +1,4 @@
+import torchtext; torchtext.disable_torchtext_deprecation_warning()
 import os
 from os.path import exists
 import torch
@@ -15,7 +16,7 @@ from torchtext.vocab import build_vocab_from_iterator
 import torchtext.datasets as datasets
 import spacy
 import GPUtil
-import warnings
+import warnings 
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -24,14 +25,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from model import make_model
 from label_smoothing import LabelSmoothing
 from batch import Batch
-import torchtext
 import nltk
 import onnxruntime as ort
 ort.set_default_logger_severity(3)
 import numpy as np
-#from onnx_inference_legacy import run_module
 from onnx_optimized_inference import run_module
-#from onnx_inference import run_module
 import copy
 from qonnx.core.modelwrapper import ModelWrapper
 import onnx.numpy_helper as numpy_helper
@@ -47,6 +45,7 @@ RUN_EXAMPLES = True
 import argparse
 parser = argparse.ArgumentParser('Fault Injection Program')
 parser.add_argument('--directory_name')
+parser.add_argument('--experiment_output_name')
 parser.add_argument('--module')
 args = parser.parse_args()
 import json
@@ -542,7 +541,7 @@ def check_outputs(
     n_examples,
     pad_idx,
     eos_string,
-    b,
+    batch,
 ):
     #n_examples = 1
     results = [()] * n_examples
@@ -550,10 +549,12 @@ def check_outputs(
     output_text = []
     model.eval()
 
+    fault_injection_results = []
     golden_and_faulty_results = []
     for idx in range(n_examples):
-        print("\nExample %d ========\n" % idx)
+        #print("\nExample %d ========\n" % idx)
         #b = next(iter(valid_dataloader))
+        b = batch[idx]
         rb = Batch(b[0], b[1], pad_idx)
         #greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
         for inject_fault in [False, True]:
@@ -565,6 +566,12 @@ def check_outputs(
                 vocab_tgt.get_itos()[x] for x in rb.tgt[0] if x != pad_idx
             ]
 
+            if inject_fault:
+                print("\nExample %d - Faulty ========\n" % idx)
+            else:
+                print("\nExample %d - Golden ========\n" % idx)
+
+            """
             print(
                 "Source Text (Input)        : "
                 + " ".join(src_tokens).replace("\n", "")
@@ -573,8 +580,8 @@ def check_outputs(
                 "Target Text (Ground Truth) : "
                 + " ".join(tgt_tokens).replace("\n", "")
             )
+            """
 
-            print("\nExample %d ========\n" % idx)
             if inject_fault:
                 model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters)[0]
             else:
@@ -601,26 +608,32 @@ def check_outputs(
             output_string = (" ".join(output_list))
             output_list = fix_sentence(output_string)
             output_text.append(output_list)
+
             print(output_list)
-
             print("Model Output               : " + model_txt.replace("\n", ""))
-
             cc = nltk.translate.bleu_score.SmoothingFunction()
-            print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list, smoothing_function=cc.method4))
 
+            print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list, smoothing_function=cc.method4))
             bleu_score = nltk.translate.bleu_score.sentence_bleu([output_target], output_list, smoothing_function=cc.method4)
             golden_and_faulty_results.append(bleu_score)
             results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
-    #print("CORPUS BLEU:")
-    #print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
-    print(golden_and_faulty_results)
-    return results
+
+            if inject_fault:
+                #print("CORPUS BLEU:")
+                #print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
+                print("COMPARE:")
+                print(golden_and_faulty_results)
+                with open(inject_parameters["experiment_output_file"], "a") as file:
+                    file.write(str(str(inject_parameters["faulty_operation_name"]) + "," + str(golden_and_faulty_results[0]) + "," + str(golden_and_faulty_results[1]) + "\n"))
+                golden_and_faulty_results = []
+    #print(fault_injection_results)
+    return fault_injection_results
 
 
-def run_model_example(model_path, inject_parameters, n_examples=5):
+def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=5):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
 
-    print("Preparing Data ...")
+    #print("Preparing Data ...")
     _, valid_dataloader = create_dataloaders(
         torch.device("cpu"),
         vocab_src,
@@ -631,18 +644,20 @@ def run_model_example(model_path, inject_parameters, n_examples=5):
         is_distributed=False,
     )
 
-    print("Loading Trained Model ...")
+    #print("Loading Trained Model ...")
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
         torch.load(model_path, map_location=torch.device("cpu"))
     )
 
-    print("Checking Model Outputs:")
-
-    number_of_experiments = 1
-    batch = []
-    for b_index in range(number_of_experiments):
-        batch.append(next(iter(valid_dataloader)))
+    #print("Checking Model Outputs:")
+    number_of_parallelized_experiments = 5
+    outer_batch = []
+    for b_outer_index in range(number_of_parallelized_experiments):
+        batch = []
+        for b_inner_index in range(n_examples):
+            batch.append(next(iter(valid_dataloader)))
+        outer_batch.append(batch)
     """
     example_data = check_outputs(
         b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
@@ -650,7 +665,9 @@ def run_model_example(model_path, inject_parameters, n_examples=5):
     """
 
     with Pool() as pool:
-        example_data = pool.map(partial(check_outputs, model, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in batch])
+        example_data = pool.map(partial(check_outputs, model, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
+        print("EXPERIMENTAL RESULTS:")
+        print(example_data)
     return model, example_data
 
 def get_weight_dict(module_path):
@@ -697,10 +714,14 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
+        """
         print(str(i) + "/" + str(max_len-1))
+        """
         ys_float = model.get_tgt_embed(ys)
+        """
         print("ys_float shape:")
         print(ys_float.shape)
+        """
         
         # I want to speed up inference for decoder
         # - Individual inference is fast 
@@ -723,9 +744,11 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, pass_inject_parameters)
             out = torch.from_numpy(out[list(out.keys())[0]])
+            """
             print("---")
             print("FAULTY:")
             print(out)
+            """
             del current_decoder_graph
 
             ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
@@ -735,21 +758,25 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             })[0]))
+            """
             print("GOLDEN:")
             print(out_2)
+            """
             prob = model.generator(out_2[:, -1])
             _, next_word = torch.max(prob, dim=1)
             next_word = next_word.data[0]
             associated_values, next_words = torch.topk(prob, 2, dim=1)
             print("GOLDEN NEXT_WORD:")
             print(next_words, associated_values)
-            print(prob)
+            #print(prob)
             test_ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
             )
+            """
             print(test_ys)
             print("FLOAT:")
             print(model.get_tgt_embed(test_ys))
+            """
             del ort_sess_decoder, next_word, prob
 
             prob = model.generator(out[:, -1])
@@ -758,13 +785,15 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             associated_values, next_words = torch.topk(prob, 2, dim=1)
             print("FAULTY NEXT_WORD:")
             print(next_words, associated_values)
-            print(prob)
+            #print(prob)
             ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
             )
+            """
             print(ys)
             print("FLOAT:")
             print(model.get_tgt_embed(ys))
+            """
             continue
         else:
             ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
@@ -774,10 +803,14 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             })[0])
+            """
             print("out shape:")
             print(out)
+            """
             del ort_sess_decoder
+        """
         print(time.time() - start_time)
+        """
 
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
@@ -785,27 +818,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         ys = torch.cat(
             [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
         )
+        """
         print("YS:")
         print(ys.shape)
         print("FAULTY NEXT_WORD:")
         print(next_word)
         print("PROB:")
         print(prob)
-
-        """
-        if custom_decoder:
-            print("OUT:")
-            print(out)
-            print("OUT2:")
-            print(out[:, -1].shape)
-            print(out[:, -1])
-            print("-")
-            print("PROB:")
-            print(prob)
-            print("NEXT WORD:")
-            print(next_word)
-            print("YS:")
-            print(ys)
         """
 
     return ys
@@ -834,21 +853,26 @@ def load_trained_model():
         weight_dict, main_graph = torch.load("weights/decoder.pt")
 
     for layer in directory_list:
-        for fault_model in ["INPUT"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+        #for fault_model in ["INPUT"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+        for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
                 if "RANDOM" not in fault_model:
                     faulty_bit_position = int(bit_position)
+                """
                 print(input_inject_data)
+                """
 
                 (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, (input_trace, weight_trace) = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
 
+                """
                 print("TRACES:")
                 print(input_quantizer_name)
                 print(weight_quantizer_name)
                 print(input_trace)
                 print(weight_trace)
+                """
 
                 original_weight_dict = weight_dict.copy()
 
@@ -869,8 +893,13 @@ def load_trained_model():
 
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
-                target_inference_number = 2
-                temporary_bit_position = 7
+                # For now just inject the first inference location
+                total_experiments = 10
+                number_of_parallelized_experiments = 5
+                target_inference_number = 1
+
+                assert ((total_experiments % number_of_parallelized_experiments) == 0)
+                total_experiments = total_experiments // number_of_parallelized_experiments
 
                 inject_parameters = {}
                 inject_parameters["original_weight_dict"] = original_weight_dict
@@ -879,16 +908,13 @@ def load_trained_model():
                 inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
                 inject_parameters["faulty_trace"] = faulty_trace
-                inject_parameters["faulty_bit_position"] = temporary_bit_position#faulty_bit_position
+                inject_parameters["faulty_bit_position"] = faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
                 inject_parameters["target_inference_number"] = target_inference_number
-                run_model_example(model_path, inject_parameters, 1)
-
+                inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
+                run_model_example(model_path, inject_parameters, total_experiments, number_of_parallelized_experiments)
                 exit()
-
-
-    run_model_example()
 
 
 if is_interactive_notebook():

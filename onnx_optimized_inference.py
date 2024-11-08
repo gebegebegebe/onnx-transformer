@@ -97,8 +97,10 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             print("FINAL LAYER")
             print(faulty_operation)
             assert(len(inject_parameters["faulty_trace"]) == 1)
+            """
             print(np.nonzero(weight_dict["delta_4d"]))
             print(weight_dict["delta_4d"].shape)
+            """
             if "INPUT16" == inject_parameters["inject_type"]:
                 delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
                 random_shape = list(weight_dict["delta_4d"].shape)
@@ -121,7 +123,9 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                 for i in range(16):
                     if i >= random_shape[3]:
                         break
+                    """
                     print(indices) 
+                    """
                     delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
                     indices[3] = indices[3] + 1
                 weight_dict["delta_4d"] = delta_16
@@ -158,7 +162,9 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                 for i in range(np.random.randint(1,16)):
                     if i >= random_shape[2]:
                         break
+                    """
                     print(indices) 
+                    """
                     delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
                     indices[2] = indices[2] + 1
                 weight_dict["delta_4d"] = delta_16
@@ -175,12 +181,16 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             print(np.nonzero(weight_dict["delta_4d"]))
             temp_variable = (np.add(weight_dict[tensor_output_name], weight_dict["delta_4d"]))
             weight_dict[tensor_output_name] = temp_variable
+            """
             print(output_tensors)
             print(tensor_output_name)
             print("DIFF:")
             print(np.nonzero(output_tensors[tensor_output_name] - weight_dict[tensor_output_name]))
+            """
             output_tensors[tensor_output_name] = temp_variable
+            """
             print(output_tensors)
+            """
 
         inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
 

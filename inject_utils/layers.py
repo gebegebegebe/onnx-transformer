@@ -71,8 +71,10 @@ def int_bit_flip(input_dict, target_tensor, target_bit_position, bit_precision=4
     faulty_tensor = input_dict[target_tensor]
     faulty_tensor = np.int8(faulty_tensor)
     random_indices = [np.random.randint(0, dim) for dim in faulty_tensor.shape]
+    """
     print("ORIGINAL VALUE:")
     print(faulty_tensor[tuple(random_indices)])
+    """
     faulty_value = flip_int8_bit(faulty_tensor[tuple(random_indices)], target_bit_position)
     assert faulty_value >= -128 and faulty_value <= 127
     """
@@ -84,12 +86,14 @@ def int_bit_flip(input_dict, target_tensor, target_bit_position, bit_precision=4
 
 def perturb_quantizer(graph, node, module, model, input_dict, weight_dict, faulty_tensor_name, faulty_bit_position):
     faulty_value, target_indices = int_bit_flip(weight_dict, faulty_tensor_name, faulty_bit_position, 4)
+    """
     print("FAULTY VALUE:")
     print(faulty_value)
     
     print("INPUT")
     print(input_dict[list(input_dict.keys())[0]].shape)
     print(input_dict[list(input_dict.keys())[1]].shape)
+    """
     golden_value = weight_dict[faulty_tensor_name][tuple(target_indices)]
     is_signed = ""
     if isinstance(golden_value, np.uint8):
@@ -102,12 +106,14 @@ def perturb_quantizer(graph, node, module, model, input_dict, weight_dict, fault
     input_perturb[tuple(target_indices)] = faulty_value
     input_dict[faulty_tensor_name] = input_perturb
 
+    """
     print("INPUT INNER:")
     print(input_dict[list(input_dict.keys())[0]].shape)
     print(input_dict[list(input_dict.keys())[1]].shape)
     print("FOCUS GRAPH:")
 
     print(graph)
+    """
     if module == "Decoder":
         replacement_dictionary = {
             "onnx::ReduceMean_0_dynamic_axes_1": weight_dict["global_in"].shape[1],
