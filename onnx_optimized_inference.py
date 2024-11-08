@@ -88,8 +88,8 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                     intermediate_input_name = input_node
             assert intermediate_input_name
             input_dict[intermediate_input_name] = weight_dict["delta_4d"]
-            output_tensors = execute_onnx(model, input_dict)
-            weight_dict["delta_4d"] = output_tensors[(list(output_tensors.keys())[0])]
+            intermediate_output_tensors = execute_onnx(model, input_dict)
+            weight_dict["delta_4d"] = intermediate_output_tensors[(list(intermediate_output_tensors.keys())[0])]
             inject_parameters["intermediate_output_name"] = tensor_output_name
 
         # Final layer in faulty_trace, should be the target layer and applies the fault models
@@ -175,6 +175,12 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             print(np.nonzero(weight_dict["delta_4d"]))
             temp_variable = (np.add(weight_dict[tensor_output_name], weight_dict["delta_4d"]))
             weight_dict[tensor_output_name] = temp_variable
+            print(output_tensors)
+            print(tensor_output_name)
+            print("DIFF:")
+            print(np.nonzero(output_tensors[tensor_output_name] - weight_dict[tensor_output_name]))
+            output_tensors[tensor_output_name] = temp_variable
+            print(output_tensors)
 
         inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
 

@@ -550,12 +550,13 @@ def check_outputs(
     output_text = []
     model.eval()
 
+    golden_and_faulty_results = []
     for idx in range(n_examples):
         print("\nExample %d ========\n" % idx)
         #b = next(iter(valid_dataloader))
         rb = Batch(b[0], b[1], pad_idx)
-        greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
-        for inject_fault in [True]:#[True, False]:
+        #greedy_decode(model, rb.src, rb.src_mask, 64, 0, False)[0]
+        for inject_fault in [False, True]:
 
             src_tokens = [
                 vocab_src.get_itos()[x] for x in rb.src[0] if x != pad_idx
@@ -577,7 +578,7 @@ def check_outputs(
             if inject_fault:
                 model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters)[0]
             else:
-                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, None)[0]
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, False, None)[0]
             model_txt = (
                 " ".join(
                     [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
@@ -603,10 +604,16 @@ def check_outputs(
             print(output_list)
 
             print("Model Output               : " + model_txt.replace("\n", ""))
-            print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list))
+
+            cc = nltk.translate.bleu_score.SmoothingFunction()
+            print(nltk.translate.bleu_score.sentence_bleu([output_target], output_list, smoothing_function=cc.method4))
+
+            bleu_score = nltk.translate.bleu_score.sentence_bleu([output_target], output_list, smoothing_function=cc.method4)
+            golden_and_faulty_results.append(bleu_score)
             results[idx] = (rb, src_tokens, tgt_tokens, model_out, model_txt)
-    print("CORPUS BLEU:")
-    print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
+    #print("CORPUS BLEU:")
+    #print(nltk.translate.bleu_score.corpus_bleu(reference_text, output_text))
+    print(golden_and_faulty_results)
     return results
 
 
@@ -692,6 +699,8 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
+        print("ys_float shape:")
+        print(ys_float.shape)
         
         # I want to speed up inference for decoder
         # - Individual inference is fast 
@@ -714,7 +723,49 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, pass_inject_parameters)
             out = torch.from_numpy(out[list(out.keys())[0]])
+            print("---")
+            print("FAULTY:")
+            print(out)
             del current_decoder_graph
+
+            ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
+            out_2 = (torch.from_numpy(ort_sess_decoder.run(None, {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            })[0]))
+            print("GOLDEN:")
+            print(out_2)
+            prob = model.generator(out_2[:, -1])
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.data[0]
+            associated_values, next_words = torch.topk(prob, 2, dim=1)
+            print("GOLDEN NEXT_WORD:")
+            print(next_words, associated_values)
+            print(prob)
+            test_ys = torch.cat(
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+            )
+            print(test_ys)
+            print("FLOAT:")
+            print(model.get_tgt_embed(test_ys))
+            del ort_sess_decoder, next_word, prob
+
+            prob = model.generator(out[:, -1])
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.data[0]
+            associated_values, next_words = torch.topk(prob, 2, dim=1)
+            print("FAULTY NEXT_WORD:")
+            print(next_words, associated_values)
+            print(prob)
+            ys = torch.cat(
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+            )
+            print(ys)
+            print("FLOAT:")
+            print(model.get_tgt_embed(ys))
+            continue
         else:
             ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
             out = torch.from_numpy(ort_sess_decoder.run(None, {
@@ -723,6 +774,9 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             })[0])
+            print("out shape:")
+            print(out)
+            del ort_sess_decoder
         print(time.time() - start_time)
 
         prob = model.generator(out[:, -1])
@@ -731,6 +785,28 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         ys = torch.cat(
             [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
         )
+        print("YS:")
+        print(ys.shape)
+        print("FAULTY NEXT_WORD:")
+        print(next_word)
+        print("PROB:")
+        print(prob)
+
+        """
+        if custom_decoder:
+            print("OUT:")
+            print(out)
+            print("OUT2:")
+            print(out[:, -1].shape)
+            print(out[:, -1])
+            print("-")
+            print("PROB:")
+            print(prob)
+            print("NEXT WORD:")
+            print(next_word)
+            print("YS:")
+            print(ys)
+        """
 
     return ys
 
@@ -758,7 +834,7 @@ def load_trained_model():
         weight_dict, main_graph = torch.load("weights/decoder.pt")
 
     for layer in directory_list:
-        for fault_model in ["INPUT16"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+        for fault_model in ["INPUT"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
@@ -793,7 +869,8 @@ def load_trained_model():
 
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
-                target_inference_number = 5
+                target_inference_number = 2
+                temporary_bit_position = 7
 
                 inject_parameters = {}
                 inject_parameters["original_weight_dict"] = original_weight_dict
@@ -802,7 +879,7 @@ def load_trained_model():
                 inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
                 inject_parameters["faulty_trace"] = faulty_trace
-                inject_parameters["faulty_bit_position"] = faulty_bit_position
+                inject_parameters["faulty_bit_position"] = temporary_bit_position#faulty_bit_position
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
                 inject_parameters["target_inference_number"] = target_inference_number
