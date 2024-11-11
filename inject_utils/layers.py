@@ -1,5 +1,5 @@
 from onnx import helper, ModelProto, TensorProto, OperatorSetIdProto, shape_inference
-from finn.core.onnx_exec import execute_onnx
+from qonnx.core.onnx_exec import execute_onnx
 #from inject_utils.utils import *
 import numpy as np
 import struct

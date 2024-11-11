@@ -8,14 +8,12 @@ import math
 import copy
 import time
 from torch.optim.lr_scheduler import LambdaLR
-import pandas as pd
-import altair as alt
 from torchtext.data.functional import to_map_style_dataset
 from torch.utils.data import DataLoader
 from torchtext.vocab import build_vocab_from_iterator
 import torchtext.datasets as datasets
 import spacy
-import GPUtil
+#import GPUtil
 import warnings 
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
@@ -477,7 +475,7 @@ def train_worker(
             train_state=train_state,
         )
 
-        GPUtil.showUtilization()
+        #GPUtil.showUtilization()
         if is_main_process:
             file_path = "%s%.2d.pt" % (config["file_prefix"], epoch)
             torch.save(module.state_dict(), file_path)
