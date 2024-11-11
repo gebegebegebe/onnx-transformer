@@ -4,6 +4,6 @@
 	"weight_tensor"		: "Round_58_out0",
 	"bias_tensor"		: "None",
 	"output_tensor"		: "MatMul_82_out0",
-	"module"		: "Decoder",
+	"module"		: "Decoder/FirstFC",
 	"model_name"		: "./try/decoder_try_cleaned.onnx"
 }
