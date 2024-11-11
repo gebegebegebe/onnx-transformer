@@ -71,7 +71,7 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
         print("FAULTY:")
         print(faulty_value)
 
-    if inject_parameters and (inject_parameters["targetted_module"] == module) and (inject_parameters["faulty_trace"]) and (node.name == inject_parameters["faulty_trace"][0]) and (inject_parameters["inject_type"] in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16"]):
+    if inject_parameters and (module in inject_parameters["targetted_module"]) and (inject_parameters["faulty_trace"]) and (node.name == inject_parameters["faulty_trace"][0]) and (inject_parameters["inject_type"] in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16"]):
         faulty_operation = inject_parameters["faulty_trace"][0]
 
         # First layer in faulty_trace, obtains perturbations

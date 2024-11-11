@@ -651,7 +651,7 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
     )
 
     #print("Checking Model Outputs:")
-    number_of_parallelized_experiments = 5
+    #number_of_parallelized_experiments = 5
     outer_batch = []
     for b_outer_index in range(number_of_parallelized_experiments):
         batch = []
@@ -666,8 +666,10 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
 
     with Pool() as pool:
         example_data = pool.map(partial(check_outputs, model, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
+        """
         print("EXPERIMENTAL RESULTS:")
         print(example_data)
+        """
     return model, example_data
 
 def get_weight_dict(module_path):
@@ -730,9 +732,19 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
         pass_inject_parameters = None
         custom_decoder = False
-        if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)) and (inject_parameters["targetted_module"]=="Decoder"):
+
+        """
+        print(bool(inject_parameters))
+        if inject_parameters:
+            print(inject_parameters["target_inference_number"] - 1)
+            print(inject_parameters["targetted_module"])
+        """
+
+        if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)) and ("Decoder" in inject_parameters["targetted_module"]):
             pass_inject_parameters = inject_parameters
             custom_decoder = True
+
+        #print(str(i) + "/" + str(max_len))
 
         start_time = time.time()
         if custom_decoder:
@@ -764,13 +776,14 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             """
             prob = model.generator(out_2[:, -1])
             _, next_word = torch.max(prob, dim=1)
-            next_word = next_word.data[0]
+            golden_next_word = next_word.data[0]
             associated_values, next_words = torch.topk(prob, 2, dim=1)
             print("GOLDEN NEXT_WORD:")
             print(next_words, associated_values)
+            print(golden_next_word)
             #print(prob)
             test_ys = torch.cat(
-                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(golden_next_word)], dim=1
             )
             """
             print(test_ys)
@@ -785,7 +798,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             associated_values, next_words = torch.topk(prob, 2, dim=1)
             print("FAULTY NEXT_WORD:")
             print(next_words, associated_values)
+            print(next_word)
+
+            print(next_word==golden_next_word)
+            if (next_word!=golden_next_word):
+                print("TOKEN CHANGED!")
             #print(prob)
+
             ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
             )
@@ -894,8 +913,8 @@ def load_trained_model():
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
                 # For now just inject the first inference location
-                total_experiments = 10
-                number_of_parallelized_experiments = 5
+                total_experiments = 1#10
+                number_of_parallelized_experiments = 1#5
                 target_inference_number = 1
 
                 assert ((total_experiments % number_of_parallelized_experiments) == 0)
