@@ -1,41 +1,41 @@
 import torchtext; torchtext.disable_torchtext_deprecation_warning()
 import os
-from os.path import exists
 import torch
 import torch.nn as nn
-from torch.nn.functional import log_softmax, pad
 import math
 import copy
 import time
-from torch.optim.lr_scheduler import LambdaLR
-from torchtext.data.functional import to_map_style_dataset
-from torch.utils.data import DataLoader
-from torchtext.vocab import build_vocab_from_iterator
 import torchtext.datasets as datasets
 import spacy
-#import GPUtil
 import warnings 
-from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
+from torch.nn.functional import log_softmax, pad
+from torchtext.vocab import build_vocab_from_iterator
+from torchtext.data.functional import to_map_style_dataset
+from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
+from os.path import exists
 
-from model import make_model
-from label_smoothing import LabelSmoothing
 from batch import Batch
+from model import make_model
+from functools import partial
+from multiprocessing import Pool
+from label_smoothing import LabelSmoothing
+from onnx.shape_inference import infer_shapes
+from onnx_optimized_inference import run_module
+from qonnx.core.modelwrapper import ModelWrapper
 import nltk
 import onnxruntime as ort
-ort.set_default_logger_severity(3)
 import numpy as np
-from onnx_optimized_inference import run_module
 import copy
-from qonnx.core.modelwrapper import ModelWrapper
+import json
 import onnx.numpy_helper as numpy_helper
-from onnx.shape_inference import infer_shapes
-from multiprocessing import Pool
-from functools import partial
 
 # Set to False to skip notebook execution (e.g. for debugging)
+ort.set_default_logger_severity(3)
 warnings.filterwarnings("ignore")
 RUN_EXAMPLES = True
 # Some convenience helper functions used throughout the notebook
@@ -46,138 +46,24 @@ parser.add_argument('--directory_name')
 parser.add_argument('--experiment_output_name')
 parser.add_argument('--module')
 args = parser.parse_args()
-import json
 
 from inject_utils.layers import *
 from inject_utils.utils import *
 
-class TrainState:
-    """Track number of steps, examples, and tokens processed"""
-
-    step: int = 0  # Steps in the current epoch
-    accum_step: int = 0  # Number of gradient accumulation steps
-    samples: int = 0  # total # of examples used
-    tokens: int = 0  # total # of tokens processed
-
-def rate(step, model_size, factor, warmup):
-    """
-    we have to default the step to 1 for LambdaLR function
-    to avoid zero raising to negative power.
-    """
-    if step == 0:
-        step = 1
-    return factor * (
-        model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
-    )
-
-def run_epoch(
-    data_iter,
-    model,
-    loss_compute,
-    optimizer,
-    scheduler,
-    mode="train",
-    accum_iter=1,
-    train_state=TrainState(),
-):
-    """Train a single epoch"""
-    start = time.time()
-    total_tokens = 0
-    total_loss = 0
-    tokens = 0
-    n_accum = 0
-    for i, batch in enumerate(data_iter):
-        print(i)
-        out = model.forward(
-            batch.src, batch.tgt, batch.src_mask, batch.tgt_mask
-        )
-        loss, loss_node = loss_compute(out, batch.tgt_y, batch.ntokens)
-        # loss_node = loss_node / accum_iter
-        if mode == "train" or mode == "train+log":
-            loss_node.backward()
-            train_state.step += 1
-            train_state.samples += batch.src.shape[0]
-            train_state.tokens += batch.ntokens
-            if i % accum_iter == 0:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-                n_accum += 1
-                train_state.accum_step += 1
-            scheduler.step()
-
-        total_loss += loss
-        total_tokens += batch.ntokens
-        tokens += batch.ntokens
-        if i % 40 == 1 and (mode == "train" or mode == "train+log"):
-            lr = optimizer.param_groups[0]["lr"]
-            elapsed = time.time() - start
-            print(
-                (
-                    "Epoch Step: %6d | Accumulation Step: %3d | Loss: %6.2f "
-                    + "| Tokens / Sec: %7.1f | Learning Rate: %6.1e"
-                )
-                % (i, n_accum, loss / batch.ntokens, tokens / elapsed, lr)
-            )
-            start = time.time()
-            tokens = 0
-        print(loss)
-        del loss
-        del loss_node
-    return total_loss / total_tokens, train_state
-
-class SimpleLossCompute:
-    "A simple loss compute and train function."
-
-    def __init__(self, generator, criterion):
-        self.generator = generator
-        self.criterion = criterion
-
-    def __call__(self, x, y, norm):
-        x = self.generator(x)
-        sloss = (
-            self.criterion(
-                x.contiguous().view(-1, x.size(-1)), y.contiguous().view(-1)
-            )
-            / norm
-        )
-        return sloss.data * norm, sloss
-
 def is_interactive_notebook():
     return __name__ == "__main__"
-
 
 def show_example(fn, args=[]):
     if __name__ == "__main__" and RUN_EXAMPLES:
         return fn(*args)
 
-
 def execute_example(fn, args=[]):
     if __name__ == "__main__" and RUN_EXAMPLES:
         fn(*args)
 
-
-class DummyOptimizer(torch.optim.Optimizer):
-    def __init__(self):
-        self.param_groups = [{"lr": 0}]
-        None
-
-    def step(self):
-        None
-
-    def zero_grad(self, set_to_none=False):
-        None
-
-
-class DummyScheduler:
-    def step(self):
-        None
-
 # Load spacy tokenizer models, download them if they haven't been
 # downloaded already
-
-
 def load_tokenizers():
-
     try:
         spacy_de = spacy.load("de_core_news_sm")
     except IOError:
@@ -403,125 +289,6 @@ def create_dataloaders(
     )
     return train_dataloader, valid_dataloader
 
-def train_worker(
-    gpu,
-    ngpus_per_node,
-    vocab_src,
-    vocab_tgt,
-    spacy_de,
-    spacy_en,
-    config,
-    is_distributed=False,
-):
-    print(f"Train worker process using GPU: {gpu} for training", flush=True)
-    #torch.cuda.set_device(gpu)
-
-    pad_idx = vocab_tgt["<blank>"]
-    d_model = 512
-    model = make_model(len(vocab_src), len(vocab_tgt), N=6)
-    #model.cuda(gpu)
-    module = model
-    is_main_process = True
-    if is_distributed:
-        dist.init_process_group(
-            "nccl", init_method="env://", rank=gpu, world_size=ngpus_per_node
-        )
-        model = DDP(model, device_ids=[gpu])
-        module = model.module
-        is_main_process = gpu == 0
-
-    criterion = LabelSmoothing(
-        size=len(vocab_tgt), padding_idx=pad_idx, smoothing=0.1
-    )
-    #criterion.cuda(gpu)
-
-    train_dataloader, valid_dataloader = create_dataloaders(
-        gpu,
-        vocab_src,
-        vocab_tgt,
-        spacy_de,
-        spacy_en,
-        batch_size=config["batch_size"] // ngpus_per_node,
-        max_padding=config["max_padding"],
-        is_distributed=is_distributed,
-    )
-
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=config["base_lr"], betas=(0.9, 0.98), eps=1e-9
-    )
-    lr_scheduler = LambdaLR(
-        optimizer=optimizer,
-        lr_lambda=lambda step: rate(
-            step, d_model, factor=1, warmup=config["warmup"]
-        ),
-    )
-    train_state = TrainState()
-
-    for epoch in range(config["num_epochs"]):
-        if is_distributed:
-            train_dataloader.sampler.set_epoch(epoch)
-            valid_dataloader.sampler.set_epoch(epoch)
-
-        model.train()
-        print(f"[GPU{gpu}] Epoch {epoch} Training ====", flush=True)
-        _, train_state = run_epoch(
-            (Batch(b[0], b[1], pad_idx) for b in train_dataloader),
-            model,
-            SimpleLossCompute(module.generator, criterion),
-            optimizer,
-            lr_scheduler,
-            mode="train+log",
-            accum_iter=config["accum_iter"],
-            train_state=train_state,
-        )
-
-        #GPUtil.showUtilization()
-        if is_main_process:
-            file_path = "%s%.2d.pt" % (config["file_prefix"], epoch)
-            torch.save(module.state_dict(), file_path)
-        torch.cuda.empty_cache()
-
-        print(f"[GPU{gpu}] Epoch {epoch} Validation ====", flush=True)
-        model.eval()
-        sloss = run_epoch(
-            (Batch(b[0], b[1], pad_idx) for b in valid_dataloader),
-            model,
-            SimpleLossCompute(module.generator, criterion),
-            DummyOptimizer(),
-            DummyScheduler(),
-            mode="eval",
-        )
-        print(sloss)
-        torch.cuda.empty_cache()
-
-    if is_main_process:
-        file_path = "%sfinal.pt" % config["file_prefix"]
-        torch.save(module.state_dict(), file_path)
-
-def train_distributed_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
-    from the_annotated_transformer import train_worker
-
-    ngpus = torch.cuda.device_count()
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12356"
-    print(f"Number of GPUs detected: {ngpus}")
-    print("Spawning training processes ...")
-    mp.spawn(
-        train_worker,
-        nprocs=ngpus,
-        args=(ngpus, vocab_src, vocab_tgt, spacy_de, spacy_en, config, True),
-    )
-
-
-def train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
-    if config["distributed"]:
-        train_distributed_model(
-            vocab_src, vocab_tgt, spacy_de, spacy_en, config
-        )
-    else:
-        train_worker(
-            0, 1, vocab_src, vocab_tgt, spacy_de, spacy_en, config, False
-        )
 
 def fix_sentence(output_target):
     output_target = output_target.replace("@@ ","")
@@ -532,7 +299,7 @@ def fix_sentence(output_target):
     return output_target
 
 def check_outputs(
-    model,
+    model_path,
     vocab_src,
     vocab_tgt,
     inject_parameters,
@@ -541,7 +308,10 @@ def check_outputs(
     eos_string,
     batch,
 ):
-    #n_examples = 1
+    model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    model.load_state_dict(
+        torch.load(model_path, map_location=torch.device("cpu"))
+    )
     results = [()] * n_examples
     reference_text = []
     output_text = []
@@ -622,7 +392,7 @@ def check_outputs(
                 print("COMPARE:")
                 print(golden_and_faulty_results)
                 with open(inject_parameters["experiment_output_file"], "a") as file:
-                    file.write(str(str(inject_parameters["faulty_operation_name"]) + "," + str(golden_and_faulty_results[0]) + "," + str(golden_and_faulty_results[1]) + "\n"))
+                    file.write(str(str(inject_parameters["faulty_operation_name"]) + "," + str(golden_and_faulty_results[0]) + "," + str(golden_and_faulty_results[1]) + "," + str(inject_parameters["faulty_bit_position"]) + "\n"))
                 golden_and_faulty_results = []
     #print(fault_injection_results)
     return fault_injection_results
@@ -642,20 +412,24 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
         is_distributed=False,
     )
 
-    #print("Loading Trained Model ...")
+    """
+    print("Loading Trained Model ...")
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
         torch.load(model_path, map_location=torch.device("cpu"))
     )
 
-    #print("Checking Model Outputs:")
-    #number_of_parallelized_experiments = 5
+    print("Checking Model Outputs:")
+    """
+
     outer_batch = []
+
     for b_outer_index in range(number_of_parallelized_experiments):
         batch = []
         for b_inner_index in range(n_examples):
             batch.append(next(iter(valid_dataloader)))
         outer_batch.append(batch)
+
     """
     example_data = check_outputs(
         b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
@@ -663,12 +437,9 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
     """
 
     with Pool() as pool:
-        example_data = pool.map(partial(check_outputs, model, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
-        """
-        print("EXPERIMENTAL RESULTS:")
-        print(example_data)
-        """
-    return model, example_data
+        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
+
+    return example_data
 
 def get_weight_dict(module_path):
     module = ModelWrapper(module_path)
@@ -698,11 +469,20 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     src_float = model.get_src_embed(src)
     encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
     #torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
-    memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
-    memory = torch.from_numpy(memory[list(memory.keys())[0]])
+    
+    if (not inject_parameters) or ("Encoder" not in inject_parameters["targetted_module"]):
+        ort_sess_encoder = ort.InferenceSession('./try/encoder_try_cleaned.onnx')
+        memory = torch.from_numpy(ort_sess_encoder.run(None, {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy()
+        })[0])
+    else:
+        memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
+        memory = torch.from_numpy(memory[list(memory.keys())[0]])
+
+
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
-    import time
     ys_float = model.get_tgt_embed(ys)
     decoder_weight_dict, decoder_graph = prepare_inference("./try/decoder_try_cleaned.onnx", {
             "global_in": ys_float.detach().numpy(),
@@ -714,9 +494,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
     #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
 
     for i in range(max_len - 1):
-        """
         print(str(i) + "/" + str(max_len-1))
-        """
         ys_float = model.get_tgt_embed(ys)
         """
         print("ys_float shape:")
@@ -726,7 +504,6 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         # I want to speed up inference for decoder
         # - Individual inference is fast 
         # - but the switching between inferences take too long
-
 
         pass_inject_parameters = None
         custom_decoder = False
@@ -932,7 +709,6 @@ def load_trained_model():
                 inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
                 run_model_example(model_path, inject_parameters, total_experiments, number_of_parallelized_experiments)
                 exit()
-
 
 if is_interactive_notebook():
     model = load_trained_model()
