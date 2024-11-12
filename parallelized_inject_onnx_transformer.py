@@ -467,8 +467,12 @@ def prepare_inference(module_path, module_input_values):
 
 def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False, inject_parameters=None):
     src_float = model.get_src_embed(src)
-    encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
-    #torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
+
+    if exists("weights/encoder.pt"):
+        encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
+    else:
+        encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
+        #torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
     
     if (not inject_parameters) or ("Encoder" not in inject_parameters["targetted_module"]):
         ort_sess_encoder = ort.InferenceSession('./try/encoder_try_cleaned.onnx')
@@ -480,18 +484,20 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
         memory = torch.from_numpy(memory[list(memory.keys())[0]])
 
-
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
     ys_float = model.get_tgt_embed(ys)
-    decoder_weight_dict, decoder_graph = prepare_inference("./try/decoder_try_cleaned.onnx", {
-            "global_in": ys_float.detach().numpy(),
-            "global_in_1": memory.detach().numpy(),
-            "global_in_2": src_mask.detach().numpy(),
-            "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-    })
-    #torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
-    #decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
+
+    if exists("weights/decoder.pt"):
+        decoder_weight_dict, decoder_graph = torch.load("weights/decoder.pt")
+    else:
+        decoder_weight_dict, decoder_graph = prepare_inference("./try/decoder_try_cleaned.onnx", {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+        })
+        #torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
 
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
