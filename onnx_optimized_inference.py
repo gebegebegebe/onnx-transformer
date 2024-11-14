@@ -89,7 +89,18 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             assert intermediate_input_name
             input_dict[intermediate_input_name] = weight_dict["delta_4d"]
             intermediate_output_tensors = execute_onnx(model, input_dict)
+            """
+            print("--")
+            print(input_dict)
+            print(np.nonzero(intermediate_output_tensors[(list(intermediate_output_tensors.keys())[0])]))
+            print(intermediate_output_tensors.keys())
+            """
             weight_dict["delta_4d"] = intermediate_output_tensors[(list(intermediate_output_tensors.keys())[0])]
+            """
+            print(np.nonzero(intermediate_output_tensors[(list(intermediate_output_tensors.keys())[0])]))
+            print(intermediate_output_tensors.keys())
+            print("--")
+            """
             inject_parameters["intermediate_output_name"] = tensor_output_name
 
         # Final layer in faulty_trace, should be the target layer and applies the fault models
@@ -97,10 +108,6 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             print("FINAL LAYER")
             print(faulty_operation)
             assert(len(inject_parameters["faulty_trace"]) == 1)
-            """
-            print(np.nonzero(weight_dict["delta_4d"]))
-            print(weight_dict["delta_4d"].shape)
-            """
             if "INPUT16" == inject_parameters["inject_type"]:
                 delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
                 random_shape = list(weight_dict["delta_4d"].shape)
@@ -111,40 +118,41 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                     row_index = np.random.randint(0, row_index)
                 row_index = row_index*16
                 indices = []
-                for shape_index_array in np.nonzero(weight_dict["delta_4d"]):
-                    indices.append(list(shape_index_array)[0])
-                indices[3] = row_index
+                if len(np.nonzero(weight_dict["delta_4d"])[0]) > 0:
+                    for shape_index_array in np.nonzero(weight_dict["delta_4d"]):
+                        indices.append(list(shape_index_array)[0])
+                    indices[3] = row_index
 
-                """
-                print(indices)
-                print(weight_dict["delta_4d"][tuple(indices)])
-                """
+                    """
+                    print(indices)
+                    print(weight_dict["delta_4d"][tuple(indices)])
+                    """
 
-                for i in range(16):
-                    if i >= random_shape[3]:
-                        break
+                    for i in range(16):
+                        if i >= random_shape[3]:
+                            break
+                        """
+                        print(indices) 
+                        """
+                        delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
+                        indices[3] = indices[3] + 1
+                    weight_dict["delta_4d"] = delta_16
                     """
-                    print(indices) 
+                    print("THIS:")
+                    print(np.nonzero(weight_dict["delta_4d"]))
+                    random_shape[-1] = random_shape[-1]//16
+                    start_index = [np.random.randint(i) for i in random_shape]
+                    start_index[-1] = start_index[-1]*16
+                    print(start_index)
+                    for i in range(16):
+                        start_index = tuple(start_index)
+                        delta_16[start_index] = weight_dict["delta_4d"][start_index]
+        
+                        start_index = list(start_index)
+                        start_index[-1] = start_index[-1]+1
+                    weight_dict["delta_4d"] = delta_16
+                    print("INPUT16")
                     """
-                    delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
-                    indices[3] = indices[3] + 1
-                weight_dict["delta_4d"] = delta_16
-                """
-                print("THIS:")
-                print(np.nonzero(weight_dict["delta_4d"]))
-                random_shape[-1] = random_shape[-1]//16
-                start_index = [np.random.randint(i) for i in random_shape]
-                start_index[-1] = start_index[-1]*16
-                print(start_index)
-                for i in range(16):
-                    start_index = tuple(start_index)
-                    delta_16[start_index] = weight_dict["delta_4d"][start_index]
-    
-                    start_index = list(start_index)
-                    start_index[-1] = start_index[-1]+1
-                weight_dict["delta_4d"] = delta_16
-                print("INPUT16")
-                """
             elif "WEIGHT16" == inject_parameters["inject_type"]:
                 delta_16 = np.zeros(weight_dict["delta_4d"].shape, dtype=np.float32)
                 random_shape = list(weight_dict["delta_4d"].shape)
@@ -155,26 +163,27 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
                     column_index = np.random.randint(0, column_index)
                 column_index = column_index*16
                 indices = []
-                for shape_index_array in np.nonzero(weight_dict["delta_4d"]):
-                    indices.append(list(shape_index_array)[0])
-                indices[2] = column_index
+                if len(np.nonzero(weight_dict["delta_4d"])[0]) > 0:
+                    for shape_index_array in np.nonzero(weight_dict["delta_4d"]):
+                        indices.append(list(shape_index_array)[0])
+                    indices[2] = column_index
 
-                for i in range(np.random.randint(1,16)):
-                    if i >= random_shape[2]:
-                        break
+                    for i in range(np.random.randint(1,16)):
+                        if i >= random_shape[2]:
+                            break
+                        """
+                        print(indices) 
+                        """
+                        delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
+                        indices[2] = indices[2] + 1
+                    weight_dict["delta_4d"] = delta_16
                     """
-                    print(indices) 
+                    start_index = tuple([np.random.randint(i) for i in random_shape])
+                    print(start_index)
+                    delta_16[start_index] = weight_dict["delta_4d"][start_index]
+                    weight_dict["delta_4d"] = delta_16
+                    print("WEIGHT16")
                     """
-                    delta_16[tuple(indices)] = weight_dict["delta_4d"][(tuple(indices))]
-                    indices[2] = indices[2] + 1
-                weight_dict["delta_4d"] = delta_16
-                """
-                start_index = tuple([np.random.randint(i) for i in random_shape])
-                print(start_index)
-                delta_16[start_index] = weight_dict["delta_4d"][start_index]
-                weight_dict["delta_4d"] = delta_16
-                print("WEIGHT16")
-                """
             else:
                 print("INPUTS/WEIGHTS")
             print("FAULT INJECTED!")
