@@ -499,13 +499,10 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         })
         #torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
 
+    ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
-        """
-        print("ys_float shape:")
-        print(ys_float.shape)
-        """
         
         # I want to speed up inference for decoder
         # - Individual inference is fast 
@@ -513,13 +510,6 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
         pass_inject_parameters = None
         custom_decoder = False
-
-        """
-        print(bool(inject_parameters))
-        if inject_parameters:
-            print(inject_parameters["target_inference_number"] - 1)
-            print(inject_parameters["targetted_module"])
-        """
 
         if inject_parameters and (i == (inject_parameters["target_inference_number"] - 1)) and ("Decoder" in inject_parameters["targetted_module"]):
             pass_inject_parameters = inject_parameters
@@ -537,14 +527,8 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             }, "./try/decoder_try_cleaned.onnx", decoder_weight_dict, current_decoder_graph, pass_inject_parameters)
             out = torch.from_numpy(out[list(out.keys())[0]])
-            """
-            print("---")
-            print("FAULTY:")
-            print(out)
-            """
             del current_decoder_graph
 
-            ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
             out_2 = (torch.from_numpy(ort_sess_decoder.run(None, {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
@@ -562,7 +546,6 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             print("GOLDEN NEXT_WORD:")
             print(next_words, associated_values)
             print(golden_next_word)
-            #print(prob)
             test_ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(golden_next_word)], dim=1
             )
@@ -571,7 +554,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             print("FLOAT:")
             print(model.get_tgt_embed(test_ys))
             """
-            del ort_sess_decoder, next_word, prob
+            del next_word, prob
 
             prob = model.generator(out[:, -1])
             _, next_word = torch.max(prob, dim=1)
@@ -584,7 +567,6 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             print(next_word==golden_next_word)
             if (next_word!=golden_next_word):
                 print("TOKEN CHANGED!")
-            #print(prob)
 
             ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
@@ -596,7 +578,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             """
             continue
         else:
-            ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
+            #ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
             out = torch.from_numpy(ort_sess_decoder.run(None, {
                 "global_in": ys_float.detach().numpy(),
                 "global_in_1": memory.detach().numpy(),
@@ -607,7 +589,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             print("out shape:")
             print(out)
             """
-            del ort_sess_decoder
+            #del ort_sess_decoder
         """
         print(time.time() - start_time)
         """
