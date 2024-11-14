@@ -1,5 +1,6 @@
 import torchtext; torchtext.disable_torchtext_deprecation_warning()
 import os
+import onnx
 import torch
 import torch.nn as nn
 import math
@@ -397,6 +398,41 @@ def check_outputs(
     #print(fault_injection_results)
     return fault_injection_results
 
+def build_auxiliary_graphs(inject_parameters):
+    def extract_model(input_path, output_path, target_input, input_names, output_names):
+        onnx.utils.extract_model(input_path, ("./separated/" + output_path), input_names, output_names)
+
+    os.system("rm ./separated/*")
+
+    module = "decoder"
+    input_names = ["global_in", "global_in_1", "global_in_2", "global_in_3"]
+    original_input_names = ["global_in", "global_in_1", "global_in_2", "global_in_3"]
+    if "Encoder" in inject_parameters["targetted_module"]:
+        module = "encoder"
+        input_names = ["global_in", "global_in_1"]
+        original_input_names = ["global_in", "global_in_1"]
+    input_path = "./try/" + module + "_try_cleaned.onnx"
+    #output_path = "./separated/modified_module"
+
+    output_names = ["global_out"]
+    original_output_names = ["global_out"]
+
+    if ("INPUT" in inject_parameters["inject_type"]) or ("WEIGHT" in inject_parameters["inject_type"]):
+        target_input = inject_parameters["faulty_tensor_name"]
+        output_names = [target_input]
+        extract_model(input_path, "tensor_to_inject.onnx", None, input_names, output_names)
+
+        input_names = input_names + [target_input]
+        output_names = [inject_parameters["faulty_output_tensor"]]
+        extract_model(input_path, "layer_to_inject.onnx", None, input_names, output_names)
+
+    elif ("RANDOM" in inject_parameters["inject_type"]):
+        input_names = input_names
+        output_names = [inject_parameters["faulty_output_tensor"]]
+        extract_model(input_path, "layer_to_inject.onnx", None, input_names, output_names)
+
+    original_input_names = original_input_names + output_names
+    extract_model(input_path, "rest_of_layers.onnx", None, original_input_names, original_output_names)
 
 def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=5):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
@@ -435,6 +471,7 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
         b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
     )
     """
+    build_auxiliary_graphs(inject_parameters)
 
     with Pool() as pool:
         example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
@@ -450,7 +487,15 @@ def get_weight_dict(module_path):
         module_weight_dict[weight.name] = numpy_helper.to_array(weight)
     return module_graph, module_weight_dict
 
-def prepare_inference(module_path, module_input_values):
+def prepare_inference(module_path, module_input_values, inject_parameters=None):
+    if inject_parameters:
+        layer_model = onnx.load(module_path)
+        for value_info in layer_model.graph.value_info:
+            if (value_info.name) in list(module_input_values.keys()):
+                layer_model.graph.value_info.remove(value_info)
+            if (value_info.name) == inject_parameters["faulty_output_tensor"]:
+                layer_model.graph.value_info.remove(value_info)
+        onnx.save(layer_model, module_path)
     module = ModelWrapper(module_path)
     output = [node.name for node in module.graph.output]
 
@@ -472,17 +517,66 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
         encoder_weight_dict, encoder_graph = torch.load("weights/encoder.pt")
     else:
         encoder_weight_dict, encoder_graph = prepare_inference("./try/encoder_try_cleaned.onnx", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()})
-        #torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
-    
+        torch.save((encoder_weight_dict, encoder_graph), "./weights/encoder.pt")
+    ort_sess_encoder = ort.InferenceSession('./try/encoder_try_cleaned.onnx')
+
     if (not inject_parameters) or ("Encoder" not in inject_parameters["targetted_module"]):
-        ort_sess_encoder = ort.InferenceSession('./try/encoder_try_cleaned.onnx')
         memory = torch.from_numpy(ort_sess_encoder.run(None, {
             "global_in": src_float.detach().numpy(), 
             "global_in_1": src_mask.detach().numpy()
         })[0])
     else:
+        # TODO: implement RANDOM and RANDOM_BITFLIP
+        # TODO: tidy up source code
+        ort_pre_inject_encoder = ort.InferenceSession('./separated/tensor_to_inject.onnx')
+        tensor_to_inject = torch.from_numpy(ort_pre_inject_encoder.run(None, {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy(),
+        })[0])
+        _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy(),
+            inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+        }, inject_parameters)
+        faulty_layer_output, _ = run_module("Encoder", {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy(),
+            inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+        }, "./separated/layer_to_inject.onnx", encoder_weight_dict, layer_to_inject_encoder_graph, inject_parameters)
+        faulty_layer_output = torch.from_numpy(faulty_layer_output[list(faulty_layer_output.keys())[0]])
+        print(np.nonzero(faulty_layer_output))
+        print(faulty_layer_output.dtype)
+        ort_sess_rest_of_encoder = ort.InferenceSession("./separated/rest_of_layers.onnx")
+        memory = ort_sess_rest_of_encoder.run(None, {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy(),
+            inject_parameters["faulty_output_tensor"]: faulty_layer_output.detach().numpy(),
+        })[0]
+        memory_2 = ort_sess_encoder.run(None, {
+            "global_in": src_float.detach().numpy(), 
+            "global_in_1": src_mask.detach().numpy()
+        })[0]
+
+        print("DIFFERENCES:")
+        print(np.sum(memory != memory_2))
+        print("SIMILARITIES:")
+        print(np.sum(memory == memory_2))
+
+        """
+        print(memory)
+        print("--")
+        print(memory_2)
+        """
+
+        memory = torch.from_numpy(memory)
+        memory_2 = torch.from_numpy(memory_2)
+
+        """ 
+        # Old implementation (encoder)
+
         memory, _ = run_module("Encoder", {"global_in": src_float.detach().numpy(), "global_in_1": src_mask.detach().numpy()}, "./try/encoder_try_cleaned.onnx", encoder_weight_dict, encoder_graph, inject_parameters)
         memory = torch.from_numpy(memory[list(memory.keys())[0]])
+        """
 
     ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
 
@@ -497,9 +591,9 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
         })
-        #torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
+        torch.save((decoder_weight_dict, decoder_graph), "./weights/decoder.pt")
 
-    ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
+    ort_sess_decoder = ort.InferenceSession("./try/decoder_try_cleaned.onnx")
     for i in range(max_len - 1):
         print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
@@ -519,6 +613,81 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
         start_time = time.time()
         if custom_decoder:
+            # TODO: implement RANDOM and RANDOM_BITFLIP
+            # TODO: tidy up source code
+            ort_pre_inject_decoder = ort.InferenceSession('./separated/tensor_to_inject.onnx')
+            tensor_to_inject = (torch.from_numpy(ort_pre_inject_decoder.run(None, {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            })[0]))
+
+            _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+                    "global_in": ys_float.detach().numpy(),
+                    "global_in_1": memory.detach().numpy(),
+                    "global_in_2": src_mask.detach().numpy(),
+                    "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+                    inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+            }, pass_inject_parameters)
+            faulty_layer_output, _ = run_module("Decoder", {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+                inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+            }, "./separated/layer_to_inject.onnx", decoder_weight_dict, layer_to_inject_decoder_graph, pass_inject_parameters)
+            faulty_layer_output = torch.from_numpy(faulty_layer_output[list(faulty_layer_output.keys())[0]])
+            print(np.nonzero(faulty_layer_output))
+            print(faulty_layer_output.dtype)
+
+            ort_sess_rest_of_decoder = ort.InferenceSession("./separated/rest_of_layers.onnx")
+            out = (torch.from_numpy(ort_sess_rest_of_decoder.run(None, {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+                inject_parameters["faulty_output_tensor"]: faulty_layer_output.detach().numpy(),
+            })[0]))
+
+            out_2 = (torch.from_numpy(ort_sess_decoder.run(None, {
+                "global_in": ys_float.detach().numpy(),
+                "global_in_1": memory.detach().numpy(),
+                "global_in_2": src_mask.detach().numpy(),
+                "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+            })[0]))
+
+            prob = model.generator(out_2[:, -1])
+            _, next_word = torch.max(prob, dim=1)
+            golden_next_word = next_word.data[0]
+            associated_values, next_words = torch.topk(prob, 2, dim=1)
+
+            print("GOLDEN NEXT_WORD:")
+            print(next_words, associated_values)
+            print(golden_next_word)
+
+            del next_word, prob
+
+            prob = model.generator(out[:, -1])
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.data[0]
+            associated_values, next_words = torch.topk(prob, 2, dim=1)
+
+            print("FAULTY NEXT_WORD:")
+            print(next_words, associated_values)
+            print(next_word)
+            print(next_word==golden_next_word)
+
+            if (next_word!=golden_next_word):
+                print("TOKEN CHANGED!")
+
+            ys = torch.cat(
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+            )
+            continue
+            """
+            # Old implementation (decoder)
+
             current_decoder_graph = copy.deepcopy(decoder_graph)
             out, _ = run_module("Decoder", {
                 "global_in": ys_float.detach().numpy(),
@@ -535,25 +704,19 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_2": src_mask.detach().numpy(),
                 "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
             })[0]))
-            """
-            print("GOLDEN:")
-            print(out_2)
-            """
+
             prob = model.generator(out_2[:, -1])
             _, next_word = torch.max(prob, dim=1)
             golden_next_word = next_word.data[0]
             associated_values, next_words = torch.topk(prob, 2, dim=1)
+
             print("GOLDEN NEXT_WORD:")
             print(next_words, associated_values)
             print(golden_next_word)
+
             test_ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(golden_next_word)], dim=1
             )
-            """
-            print(test_ys)
-            print("FLOAT:")
-            print(model.get_tgt_embed(test_ys))
-            """
             del next_word, prob
 
             prob = model.generator(out[:, -1])
@@ -563,20 +726,16 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             print("FAULTY NEXT_WORD:")
             print(next_words, associated_values)
             print(next_word)
-
             print(next_word==golden_next_word)
+
             if (next_word!=golden_next_word):
                 print("TOKEN CHANGED!")
 
             ys = torch.cat(
                 [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
             )
-            """
-            print(ys)
-            print("FLOAT:")
-            print(model.get_tgt_embed(ys))
-            """
             continue
+            """
         else:
             #ort_sess_decoder = ort.InferenceSession('./try/decoder_try_cleaned.onnx')
             out = torch.from_numpy(ort_sess_decoder.run(None, {
@@ -635,7 +794,7 @@ def load_trained_model():
         weight_dict, main_graph = torch.load("weights/decoder.pt")
 
     for layer in directory_list:
-        #for fault_model in ["INPUT"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+        #for fault_model in ["RANDOM"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
         for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
             for bit_position in range(8):
                 input_inject_data = json.load(open(directory_name + "/" + layer))
@@ -691,6 +850,7 @@ def load_trained_model():
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
                 inject_parameters["faulty_trace"] = faulty_trace
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
+                inject_parameters["faulty_output_tensor"] = input_inject_data["output_tensor"]
                 inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
                 inject_parameters["targetted_module"] = input_inject_data["module"] 
                 inject_parameters["target_inference_number"] = target_inference_number
