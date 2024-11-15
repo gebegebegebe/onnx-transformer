@@ -303,12 +303,13 @@ def check_outputs(
     model_path,
     vocab_src,
     vocab_tgt,
-    inject_parameters,
+    #inject_parameters,
     n_examples,
     pad_idx,
     eos_string,
-    batch,
+    batch_and_inject_parameters,
 ):
+    batch, inject_parameters = batch_and_inject_parameters
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
         torch.load(model_path, map_location=torch.device("cpu"))
@@ -459,7 +460,6 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
     """
 
     outer_batch = []
-
     for b_outer_index in range(number_of_parallelized_experiments):
         batch = []
         for b_inner_index in range(n_examples):
@@ -473,9 +473,14 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
     """
     build_auxiliary_graphs(inject_parameters)
 
-    with Pool() as pool:
-        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters, n_examples, 2, "</s>"), [b for b in outer_batch])
+    inject_parameters_list = []
+    for _ in range(number_of_parallelized_experiments):
+        inject_parameters_list.append(copy.deepcopy(inject_parameters))
 
+    with Pool() as pool:
+        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, n_examples, 2, "</s>"), [(b, inject_parameter) for (b, inject_parameter) in zip(outer_batch, inject_parameters_list)])
+
+    del outer_batch, inject_parameters_list
     return example_data
 
 def get_weight_dict(module_path):
@@ -791,8 +796,6 @@ def load_trained_model():
                 total_experiments = total_experiments // number_of_parallelized_experiments
 
                 inject_parameters = {}
-                inject_parameters["original_weight_dict"] = original_weight_dict
-                inject_parameters["main_graph"] = copy.deepcopy(main_graph)
                 inject_parameters["inject_type"] = fault_model
                 inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
                 inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
