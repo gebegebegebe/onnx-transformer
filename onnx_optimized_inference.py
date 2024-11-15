@@ -202,7 +202,13 @@ def execute_node(node, main_graph, final_output_node, weight_dict, module, injec
             """
 
         inject_parameters["faulty_trace"] = inject_parameters["faulty_trace"][1:]
-
+    
+    if output_tensors is None:
+        print("HERE")
+        print(input_dict)
+        print(input_dict.keys())
+        print(node)
+        print(node.name)
     return output_tensors, weight_dict, list_operation_time
 
 def inference(main_graph, weight_dict, module, inject_parameters=None):
@@ -214,6 +220,17 @@ def inference(main_graph, weight_dict, module, inject_parameters=None):
     for node in main_graph.node:
         start_time = time.time()
         output_tensors, weight_dict, list_operation_time = execute_single_node(node, weight_dict, main_graph, module)
+        """
+        if output_tensors is None:
+            print("HERE")
+            print(input_dict)
+            print(input_dict.keys())
+            print(node)
+            print(node.name)
+        """
+    if output_tensors is None:
+        print("SINI SINI SINI")
+        print(output_tensors)
     return output_tensors, weight_dict
 
 def expand_node_inputs_outputs(graph, node, weight_dict, module):

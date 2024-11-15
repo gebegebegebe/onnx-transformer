@@ -303,13 +303,12 @@ def check_outputs(
     model_path,
     vocab_src,
     vocab_tgt,
-    #inject_parameters,
+    inject_parameters,
     n_examples,
     pad_idx,
     eos_string,
-    batch_and_inject_parameters,
+    batch,
 ):
-    batch, inject_parameters = batch_and_inject_parameters
     model = make_model(len(vocab_src), len(vocab_tgt), N=6)
     model.load_state_dict(
         torch.load(model_path, map_location=torch.device("cpu"))
@@ -473,14 +472,16 @@ def run_model_example(model_path, inject_parameters, n_examples=5, number_of_par
     """
     build_auxiliary_graphs(inject_parameters)
 
+    """
     inject_parameters_list = []
     for _ in range(number_of_parallelized_experiments):
         inject_parameters_list.append(copy.deepcopy(inject_parameters))
+    """
 
     with Pool() as pool:
-        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, n_examples, 2, "</s>"), [(b, inject_parameter) for (b, inject_parameter) in zip(outer_batch, inject_parameters_list)])
+        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters.copy(), n_examples, 2, "</s>"), [b for b in outer_batch])
 
-    del outer_batch, inject_parameters_list
+    del outer_batch
     return example_data
 
 def get_weight_dict(module_path):
@@ -561,7 +562,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in": src_float.detach().numpy(), 
                 "global_in_1": src_mask.detach().numpy(),
             })[0])
-            _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+            layer_to_inject_weight_dict, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
                 "global_in": src_float.detach().numpy(), 
                 "global_in_1": src_mask.detach().numpy(),
                 inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
@@ -570,7 +571,11 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in": src_float.detach().numpy(), 
                 "global_in_1": src_mask.detach().numpy(),
                 inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-            }, "./separated/layer_to_inject.onnx", encoder_weight_dict, layer_to_inject_encoder_graph, inject_parameters)
+            }, "./separated/layer_to_inject.onnx", layer_to_inject_weight_dict, layer_to_inject_encoder_graph, inject_parameters)
+            #TODO: Fix "None" appearing in faulty_layer_output
+            print("SEE HERE:")
+            print(tensor_to_inject)
+            print(faulty_layer_output)
             faulty_layer_output = torch.from_numpy(faulty_layer_output[list(faulty_layer_output.keys())[0]])
             """
             print(np.nonzero(faulty_layer_output))
@@ -611,7 +616,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
 
     ort_sess_decoder = ort.InferenceSession("./try/decoder_try_cleaned.onnx")
     for i in range(max_len - 1):
-        print(str(i) + "/" + str(max_len-1))
+        #print(str(i) + "/" + str(max_len-1))
         ys_float = model.get_tgt_embed(ys)
         
         pass_inject_parameters = None
@@ -788,8 +793,8 @@ def load_trained_model():
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
                 # For now just inject the first inference location
-                total_experiments = 1#10
-                number_of_parallelized_experiments = 1#5
+                total_experiments = 1
+                number_of_parallelized_experiments = 1
                 target_inference_number = 1
 
                 assert ((total_experiments % number_of_parallelized_experiments) == 0)
@@ -808,12 +813,9 @@ def load_trained_model():
                 inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
 
                 print("FAULT MODEL:")
-                print(fault_model)
+                print(fault_model, faulty_bit_position)
                 run_model_example(model_path, inject_parameters, total_experiments, number_of_parallelized_experiments)
-
-                break
                 #exit()
-        return
 
 if is_interactive_notebook():
     model = load_trained_model()
