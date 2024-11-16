@@ -815,7 +815,8 @@ def load_trained_model():
                 print("FAULT MODEL:")
                 print(fault_model, faulty_bit_position)
                 run_model_example(model_path, inject_parameters, total_experiments, number_of_parallelized_experiments)
-                #exit()
+                break
+        exit()
 
 if is_interactive_notebook():
     model = load_trained_model()
