@@ -434,7 +434,7 @@ def build_auxiliary_graphs(inject_parameters):
     original_input_names = original_input_names + output_names
     extract_model(input_path, "rest_of_layers.onnx", None, original_input_names, original_output_names)
 
-def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=5):
+def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=16):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
 
     #print("Preparing Data ...")
@@ -793,8 +793,8 @@ def load_trained_model():
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
                 # For now just inject the first inference location
-                total_experiments = 8192
-                number_of_parallelized_experiments = 8
+                total_experiments = 1024
+                number_of_parallelized_experiments = 16
                 target_inference_number = 1
 
                 assert ((total_experiments % number_of_parallelized_experiments) == 0)
@@ -815,7 +815,8 @@ def load_trained_model():
                 print("FAULT MODEL:")
                 print(fault_model, faulty_bit_position)
                 run_model_example(model_path, inject_parameters, total_experiments, number_of_parallelized_experiments)
-                #exit()
+                break
+        exit()
 
 if is_interactive_notebook():
     model = load_trained_model()
