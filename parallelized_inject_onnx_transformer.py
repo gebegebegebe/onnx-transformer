@@ -1,4 +1,6 @@
 import torchtext
+import gc
+import psutil
 import os
 import onnx
 import torch
@@ -434,55 +436,84 @@ def build_auxiliary_graphs(inject_parameters):
     original_input_names = original_input_names + output_names
     extract_model(input_path, "rest_of_layers.onnx", None, original_input_names, original_output_names)
 
-def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=16):
+def worker(gpu_id, batches, model_path, vocab_src, vocab_tgt, inject_parameters, n_examples):
+    try:
+       
+        
+    
+        batch = batches[gpu_id]
+        result = check_outputs(model_path, vocab_src, vocab_tgt, inject_parameters.copy(), 
+                             n_examples, 2, "</s>", batch)
+        
+    
+        
+        return result
+    except Exception as e:
+        print(f"Worker {gpu_id} failed with error: {str(e)}")
+        raise e
+
+def run_model_example(model_path, inject_parameters, n_examples=5, number_of_parallelized_experiments=5):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
+    
+    try:
+       
+        
+        # Get dataloader
+        _, valid_dataloader = create_dataloaders(
+            torch.device("cpu"),
+            vocab_src,
+            vocab_tgt,
+            spacy_de,
+            spacy_en,
+            batch_size=1,
+            is_distributed=False,
+        )
 
-    #print("Preparing Data ...")
-    _, valid_dataloader = create_dataloaders(
-        torch.device("cpu"),
-        vocab_src,
-        vocab_tgt,
-        spacy_de,
-        spacy_en,
-        batch_size=1,
-        is_distributed=False,
-    )
+        # Prepare batches
+        outer_batch = []
+        for b_outer_index in range(number_of_parallelized_experiments):
+            batch = []
+            for b_inner_index in range(n_examples):
+                batch.append(next(iter(valid_dataloader)))
+            outer_batch.append(batch)
 
-    """
-    print("Loading Trained Model ...")
-    model = make_model(len(vocab_src), len(vocab_tgt), N=6)
-    model.load_state_dict(
-        torch.load(model_path, map_location=torch.device("cpu"))
-    )
+        # Build auxiliary graphs
+        build_auxiliary_graphs(inject_parameters)
+        
+        # Initialize process group with timeout
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(12345 + np.random.randint(0, 1000))
+        
+      
+        available_memory = psutil.virtual_memory().available
+        if available_memory < 8 * 1024 * 1024 * 1024:  # Less than 8GB available
+            number_of_parallelized_experiments = max(1, number_of_parallelized_experiments // 2)
+            print(f"Reducing parallel experiments to {number_of_parallelized_experiments} due to memory constraints")
+        
+       
+        ctx = mp.get_context('spawn')
+        mp.spawn(
+            worker,
+            args=(outer_batch, model_path, vocab_src, vocab_tgt, inject_parameters, n_examples),
+            nprocs=number_of_parallelized_experiments,
+            join=True,
+        )
 
-    print("Checking Model Outputs:")
-    """
-
-    outer_batch = []
-    for b_outer_index in range(number_of_parallelized_experiments):
-        batch = []
-        for b_inner_index in range(n_examples):
-            batch.append(next(iter(valid_dataloader)))
-        outer_batch.append(batch)
-
-    """
-    example_data = check_outputs(
-        b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
-    )
-    """
-    build_auxiliary_graphs(inject_parameters)
-
-    """
-    inject_parameters_list = []
-    for _ in range(number_of_parallelized_experiments):
-        inject_parameters_list.append(copy.deepcopy(inject_parameters))
-    """
-
-    with Pool() as pool:
-        example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters.copy(), n_examples, 2, "</s>"), [b for b in outer_batch])
-
-    del outer_batch
-    return example_data
+    except Exception as e:
+        print(f"Error in run_model_example: {str(e)}")
+        raise e
+    
+    finally:
+      
+        del outer_batch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+   
+     
+        gc.collect()
+    
+    return None  
 
 def get_weight_dict(module_path):
     module = ModelWrapper(module_path)
@@ -793,8 +824,8 @@ def load_trained_model():
                 # Target first generated token (target_inference_number)
                 # Inject i = target_inference_number, where i is the i-th token for inference
                 # For now just inject the first inference location
-                total_experiments = 1024
-                number_of_parallelized_experiments = 16
+                total_experiments = 16
+                number_of_parallelized_experiments = 4
                 target_inference_number = 1
 
                 assert ((total_experiments % number_of_parallelized_experiments) == 0)
