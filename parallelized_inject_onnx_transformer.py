@@ -499,6 +499,7 @@ def get_weight_dict(module_path):
     return module_graph, module_weight_dict
 
 def prepare_inference(module_path, module_input_values, inject_parameters=None):
+    # this function works differently depending on *inject_parameters*
     if inject_parameters:
         layer_model = onnx.load(module_path)
         for value_info in layer_model.graph.value_info:
@@ -506,6 +507,9 @@ def prepare_inference(module_path, module_input_values, inject_parameters=None):
                 layer_model.graph.value_info.remove(value_info)
             if (value_info.name) == inject_parameters["faulty_output_tensor"]:
                 layer_model.graph.value_info.remove(value_info)
+        #print("CHECK MODULE PATH:")
+        #print(module_path[:-5])
+        #onnx.save(layer_model, module_path[:-5] + "_fixed.onnx")
         onnx.save(layer_model, module_path)
     module = ModelWrapper(module_path)
     output = [node.name for node in module.graph.output]
@@ -568,19 +572,34 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 "global_in_1": src_mask.detach().numpy(),
             })[0])
 
-            lock.acquire(True)
-            _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
-                "global_in": src_float.detach().numpy(), 
-                "global_in_1": src_mask.detach().numpy(),
-                inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-            }, inject_parameters)
-            lock.release()
+            #TODO: FIX THE LOCKS
+            if not exists("./separated/layer_to_inject_graph.pt"):
+                lock.acquire(True)
+                print("LOCKED UP:")
+                if not exists("./separated/layer_to_inject_graph.pt"):
+                    print("INNER FOCUS:")
+                    _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+                        "global_in": src_float.detach().numpy(), 
+                        "global_in_1": src_mask.detach().numpy(),
+                        inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+                    }, inject_parameters)
+                    torch.save(layer_to_inject_encoder_graph, "./separated/layer_to_inject_graph.pt")
+                    lock.release()
+                    print("RELEASED INNER:")
+                else:
+                    lock.release()
+                print("RELEASED")
+                layer_to_inject_encoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
+            else:
+                lock.release()
+                print("RELEASED")
+                layer_to_inject_encoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
 
             faulty_layer_output, _ = run_module("Encoder", {
                 "global_in": src_float.detach().numpy(), 
                 "global_in_1": src_mask.detach().numpy(),
                 inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-            }, "./separated/layer_to_inject.onnx", _, layer_to_inject_encoder_graph, inject_parameters)
+            }, "./separated/layer_to_inject.onnx", encoder_weight_dict, layer_to_inject_encoder_graph, inject_parameters)
             faulty_layer_output = torch.from_numpy(faulty_layer_output[list(faulty_layer_output.keys())[0]])
             ort_sess_rest_of_encoder = ort.InferenceSession("./separated/rest_of_layers.onnx")
             memory = ort_sess_rest_of_encoder.run(None, {
@@ -666,15 +685,30 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 })[0]
                 tensor_to_inject = torch.from_numpy(tensor_to_inject)
 
-                lock.acquire(True)
-                _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
-                    "global_in": ys_float.detach().numpy(),
-                    "global_in_1": memory.detach().numpy(),
-                    "global_in_2": src_mask.detach().numpy(),
-                    "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-                    inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-                }, pass_inject_parameters)
-                lock.release()
+                #TODO: FIX THE LOCKS
+                if not exists("./separated/layer_to_inject_graph.pt"):
+                    lock.acquire(True)
+                    print("LOCKED UP:")
+                    if not exists("./separated/layer_to_inject_graph.pt"):
+                        print("INNER FOCUS:")
+                        _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+                            "global_in": ys_float.detach().numpy(),
+                            "global_in_1": memory.detach().numpy(),
+                            "global_in_2": src_mask.detach().numpy(),
+                            "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+                            inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+                        }, pass_inject_parameters)
+                        torch.save(layer_to_inject_decoder_graph, "./separated/layer_to_inject_graph.pt")
+                        lock.release()
+                        print("RELEASED INNER:")
+                    else:
+                        lock.release()
+                    print("RELEASED")
+                    layer_to_inject_decoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
+                else:
+                    lock.release()
+                    print("RELEASED")
+                    layer_to_inject_decoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
 
                 faulty_layer_output, _ = run_module("Decoder", {
                     "global_in": ys_float.detach().numpy(),
@@ -772,58 +806,59 @@ def load_trained_model():
     for layer in directory_list:
         #for fault_model in ["WEIGHT16"]:#["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
         for fault_model in ["INPUT", "WEIGHT", "INPUT16", "WEIGHT16", "RANDOM", "RANDOM_BITFLIP"]:
+            input_inject_data = json.load(open(directory_name + "/" + layer))
+            """
+            print(input_inject_data)
+            """
+            (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, (input_trace, weight_trace) = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
+            original_weight_dict = weight_dict.copy()
+            faulty_quantizer_name = None
+            faulty_tensor_name = None
+            if "INPUT" in fault_model:
+                faulty_trace = input_trace
+                faulty_quantizer_name = input_quantizer_name
+                faulty_tensor_name = int_input_tensor_name
+            elif "WEIGHT" in fault_model:
+                faulty_trace = weight_trace
+                faulty_quantizer_name = weight_quantizer_name
+                faulty_tensor_name = int_weight_tensor_name
+            elif "RANDOM" in fault_model:
+                faulty_trace = None
+                faulty_quantizer = None
+                faulty_tensor_name = input_inject_data["output_tensor"]
+
+            # Target first generated token (target_inference_number)
+            # Inject i = target_inference_number, where i is the i-th token for inference
+            # For now just inject the first inference location
+            total_experiments = 5
+            number_of_parallelized_experiments = 5
+            target_inference_number = 1
+
+            assert ((total_experiments % number_of_parallelized_experiments) == 0)
+            total_experiments = total_experiments // number_of_parallelized_experiments
+
+            inject_parameters = {}
+            inject_parameters["inject_type"] = fault_model
+            inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
+            inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
+            inject_parameters["faulty_trace"] = faulty_trace
+            inject_parameters["faulty_output_tensor"] = input_inject_data["output_tensor"]
+            inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
+            inject_parameters["targetted_module"] = input_inject_data["module"] 
+            inject_parameters["target_inference_number"] = target_inference_number
+            inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
+            build_auxiliary_graphs(inject_parameters)
+
             for bit_position in range(8):
-                input_inject_data = json.load(open(directory_name + "/" + layer))
                 faulty_bit_position = None
                 if "RANDOM" not in fault_model:
                     faulty_bit_position = int(bit_position)
-                """
-                print(input_inject_data)
-                """
-                (input_quantizer_name, int_input_tensor_name), (weight_quantizer_name, int_weight_tensor_name), _, (input_trace, weight_trace) = get_target_inputs(main_graph, input_inject_data["target_layer"], input_inject_data["input_tensor"], input_inject_data["weight_tensor"], None, input_inject_data["output_tensor"])
-                original_weight_dict = weight_dict.copy()
-                faulty_quantizer_name = None
-                faulty_tensor_name = None
-                if "INPUT" in fault_model:
-                    faulty_trace = input_trace
-                    faulty_quantizer_name = input_quantizer_name
-                    faulty_tensor_name = int_input_tensor_name
-                elif "WEIGHT" in fault_model:
-                    faulty_trace = weight_trace
-                    faulty_quantizer_name = weight_quantizer_name
-                    faulty_tensor_name = int_weight_tensor_name
-                elif "RANDOM" in fault_model:
-                    faulty_trace = None
-                    faulty_quantizer = None
-                    faulty_tensor_name = input_inject_data["output_tensor"]
-
-                # Target first generated token (target_inference_number)
-                # Inject i = target_inference_number, where i is the i-th token for inference
-                # For now just inject the first inference location
-                total_experiments = 5
-                number_of_parallelized_experiments = 5
-                target_inference_number = 1
-
-                assert ((total_experiments % number_of_parallelized_experiments) == 0)
-                total_experiments = total_experiments // number_of_parallelized_experiments
-
-                inject_parameters = {}
-                inject_parameters["inject_type"] = fault_model
-                inject_parameters["faulty_tensor_name"] = faulty_tensor_name 
-                inject_parameters["faulty_quantizer_name"] = faulty_quantizer_name
-                inject_parameters["faulty_trace"] = faulty_trace
-                inject_parameters["faulty_bit_position"] = faulty_bit_position
-                inject_parameters["faulty_output_tensor"] = input_inject_data["output_tensor"]
-                inject_parameters["faulty_operation_name"] = input_inject_data["target_layer"]
-                inject_parameters["targetted_module"] = input_inject_data["module"] 
-                inject_parameters["target_inference_number"] = target_inference_number
-                inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
-
                 print("FAULT MODEL:")
                 print(fault_model, faulty_bit_position)
+                inject_parameters["faulty_bit_position"] = faulty_bit_position
                 run_model_example(model_path, inject_parameters, pool, lock, total_experiments, number_of_parallelized_experiments)
                 #break
-                exit()
+        exit()
 
 if is_interactive_notebook():
     model = load_trained_model()
