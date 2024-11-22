@@ -573,27 +573,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             })[0])
 
             #TODO: FIX THE LOCKS
-            if not exists("./separated/layer_to_inject_graph.pt"):
-                lock.acquire(True)
-                print("LOCKED UP:")
-                if not exists("./separated/layer_to_inject_graph.pt"):
-                    print("INNER FOCUS:")
-                    _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
-                        "global_in": src_float.detach().numpy(), 
-                        "global_in_1": src_mask.detach().numpy(),
-                        inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-                    }, inject_parameters)
-                    torch.save(layer_to_inject_encoder_graph, "./separated/layer_to_inject_graph.pt")
-                    lock.release()
-                    print("RELEASED INNER:")
-                else:
-                    lock.release()
-                print("RELEASED")
-                layer_to_inject_encoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
-            else:
-                lock.release()
-                print("RELEASED")
-                layer_to_inject_encoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
+            lock.acquire(True)
+            _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+                "global_in": src_float.detach().numpy(), 
+                "global_in_1": src_mask.detach().numpy(),
+                inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+            }, inject_parameters)
+            lock.release()
 
             faulty_layer_output, _ = run_module("Encoder", {
                 "global_in": src_float.detach().numpy(), 
@@ -686,29 +672,15 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 tensor_to_inject = torch.from_numpy(tensor_to_inject)
 
                 #TODO: FIX THE LOCKS
-                if not exists("./separated/layer_to_inject_graph.pt"):
-                    lock.acquire(True)
-                    print("LOCKED UP:")
-                    if not exists("./separated/layer_to_inject_graph.pt"):
-                        print("INNER FOCUS:")
-                        _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
-                            "global_in": ys_float.detach().numpy(),
-                            "global_in_1": memory.detach().numpy(),
-                            "global_in_2": src_mask.detach().numpy(),
-                            "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
-                            inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
+                lock.acquire(True)
+                _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
+                    "global_in": ys_float.detach().numpy(),
+                    "global_in_1": memory.detach().numpy(),
+                    "global_in_2": src_mask.detach().numpy(),
+                    "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
+                    inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
                         }, pass_inject_parameters)
-                        torch.save(layer_to_inject_decoder_graph, "./separated/layer_to_inject_graph.pt")
-                        lock.release()
-                        print("RELEASED INNER:")
-                    else:
-                        lock.release()
-                    print("RELEASED")
-                    layer_to_inject_decoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
-                else:
-                    lock.release()
-                    print("RELEASED")
-                    layer_to_inject_decoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
+                lock.release()
 
                 faulty_layer_output, _ = run_module("Decoder", {
                     "global_in": ys_float.detach().numpy(),
