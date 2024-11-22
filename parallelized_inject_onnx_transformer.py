@@ -375,6 +375,13 @@ def check_outputs(
 
             print("LIST:")
             output_list = [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
+
+            if "</s>" not in output_list:
+                print("NOPE")
+                with open(inject_parameters["experiment_output_file"], "a") as file:
+                    file.write(str(str(inject_parameters["faulty_operation_name"]) + "," + str(0) + "," + str(0) + "," + str(inject_parameters["faulty_bit_position"]) + "," + str(inject_parameters["inject_type"]) + "\n"))
+                return []
+
             end_index = (output_list.index("</s>"))
             output_list = output_list[1:end_index]
             output_string = (" ".join(output_list))
