@@ -307,7 +307,6 @@ def check_outputs(
     vocab_src,
     vocab_tgt,
     inject_parameters,
-    lock,
     n_examples,
     pad_idx,
     eos_string,
@@ -356,9 +355,9 @@ def check_outputs(
             """
 
             if inject_fault:
-                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters, lock)[0]
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, True, inject_parameters)[0]
             else:
-                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, False, None, None)[0]
+                model_out = greedy_decode(model, rb.src, rb.src_mask, 72, 0, False, None)[0]
             model_txt = (
                 " ".join(
                     [vocab_tgt.get_itos()[x] for x in model_out if x != pad_idx]
@@ -437,7 +436,7 @@ def build_auxiliary_graphs(inject_parameters):
     original_input_names = original_input_names + output_names
     extract_model(input_path, "rest_of_layers.onnx", None, original_input_names, original_output_names)
 
-def run_model_example(model_path, inject_parameters, pool, lock, n_examples=5, number_of_parallelized_experiments=5):
+def run_model_example(model_path, inject_parameters, pool, n_examples=5, number_of_parallelized_experiments=5):
     global vocab_src, vocab_tgt, spacy_de, spacy_en
 
     #print("Preparing Data ...")
@@ -472,8 +471,8 @@ def run_model_example(model_path, inject_parameters, pool, lock, n_examples=5, n
     example_data = check_outputs(
         b, model, vocab_src, vocab_tgt, inject_parameters, n_examples=n_examples
     )
-    """
     build_auxiliary_graphs(inject_parameters)
+    """
 
     """
     inject_parameters_list = []
@@ -484,7 +483,7 @@ def run_model_example(model_path, inject_parameters, pool, lock, n_examples=5, n
     """
     with Pool() as pool:
     """
-    example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters.copy(), lock, n_examples, 2, "</s>"), [b for b in outer_batch])
+    example_data = pool.map(partial(check_outputs, model_path, vocab_src, vocab_tgt, inject_parameters.copy(), n_examples, 2, "</s>"), [b for b in outer_batch])
 
     del outer_batch
     return example_data
@@ -498,7 +497,8 @@ def get_weight_dict(module_path):
         module_weight_dict[weight.name] = numpy_helper.to_array(weight)
     return module_graph, module_weight_dict
 
-def prepare_inference(module_path, module_input_values, inject_parameters=None):
+def prepare_inference(module_path, module_input_values):
+    """
     # this function works differently depending on *inject_parameters*
     if inject_parameters:
         layer_model = onnx.load(module_path)
@@ -511,6 +511,7 @@ def prepare_inference(module_path, module_input_values, inject_parameters=None):
         #print(module_path[:-5])
         #onnx.save(layer_model, module_path[:-5] + "_fixed.onnx")
         onnx.save(layer_model, module_path)
+    """
     module = ModelWrapper(module_path)
     output = [node.name for node in module.graph.output]
 
@@ -525,7 +526,7 @@ def prepare_inference(module_path, module_input_values, inject_parameters=None):
 
     return module_weight_dict, module_graph
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False, inject_parameters=None, lock=None):
+def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=False, inject_parameters=None):
     src_float = model.get_src_embed(src)
 
     if exists("weights/encoder.pt"):
@@ -573,13 +574,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
             })[0])
 
             #TODO: FIX THE LOCKS
-            lock.acquire(True)
             _, layer_to_inject_encoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
                 "global_in": src_float.detach().numpy(), 
                 "global_in_1": src_mask.detach().numpy(),
                 inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-            }, inject_parameters)
-            lock.release()
+            })
+
+            #layer_to_inject_encoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
 
             faulty_layer_output, _ = run_module("Encoder", {
                 "global_in": src_float.detach().numpy(), 
@@ -672,15 +673,15 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol, custom_decoder=Fa
                 tensor_to_inject = torch.from_numpy(tensor_to_inject)
 
                 #TODO: FIX THE LOCKS
-                lock.acquire(True)
                 _, layer_to_inject_decoder_graph = prepare_inference("./separated/layer_to_inject.onnx", {
                     "global_in": ys_float.detach().numpy(),
                     "global_in_1": memory.detach().numpy(),
                     "global_in_2": src_mask.detach().numpy(),
                     "global_in_3": subsequent_mask(ys.size(1)).type_as(src.data).detach().numpy(),
                     inject_parameters["faulty_tensor_name"]: tensor_to_inject.detach().numpy(),
-                        }, pass_inject_parameters)
-                lock.release()
+                        })
+
+                #layer_to_inject_decoder_graph = torch.load("./separated/layer_to_inject_graph.pt")
 
                 faulty_layer_output, _ = run_module("Decoder", {
                     "global_in": ys_float.detach().numpy(),
@@ -759,6 +760,24 @@ def subsequent_mask(size):
     )
     return subsequent_mask == 0
 
+def fix_onnx(module, module_path, inject_parameters=None):
+    if module == "Encoder":
+        weight_dict, main_graph = torch.load("weights/encoder.pt")
+    else:
+        weight_dict, main_graph = torch.load("weights/decoder.pt")
+    module_input_values = []
+    for input_tensor in main_graph.input:
+        module_input_values.append(input_tensor.name)
+    module_input_values.append(inject_parameters["faulty_tensor_name"])
+    model = onnx.load(module_path)
+    layer_model = onnx.load(module_path)
+    for value_info in layer_model.graph.value_info:
+        if (value_info.name) in module_input_values:
+            layer_model.graph.value_info.remove(value_info)
+        if (value_info.name) == inject_parameters["faulty_output_tensor"]:
+            layer_model.graph.value_info.remove(value_info)
+
+    onnx.save(layer_model, module_path)
 
 def load_trained_model():
     model_path = "checkpoint/iwslt14_model_final.pt"
@@ -768,7 +787,6 @@ def load_trained_model():
     directory_list = os.listdir(directory_name)
     bit_width = 8
     pool = Pool()
-    lock = mp.Manager().Lock()
 
     if module == "Encoder":
         weight_dict, main_graph = torch.load("weights/encoder.pt")
@@ -819,7 +837,10 @@ def load_trained_model():
             inject_parameters["targetted_module"] = input_inject_data["module"] 
             inject_parameters["target_inference_number"] = target_inference_number
             inject_parameters["experiment_output_file"] = str(args.experiment_output_name)
+
             build_auxiliary_graphs(inject_parameters)
+            if "RANDOM" not in fault_model:
+                fix_onnx(module, "./separated/layer_to_inject.onnx", inject_parameters)
 
             for bit_position in range(8):
                 faulty_bit_position = None
@@ -828,7 +849,7 @@ def load_trained_model():
                 print("FAULT MODEL:")
                 print(fault_model, faulty_bit_position)
                 inject_parameters["faulty_bit_position"] = faulty_bit_position
-                run_model_example(model_path, inject_parameters, pool, lock, total_experiments, number_of_parallelized_experiments)
+                run_model_example(model_path, inject_parameters, pool, total_experiments, number_of_parallelized_experiments)
                 #break
         exit()
 
