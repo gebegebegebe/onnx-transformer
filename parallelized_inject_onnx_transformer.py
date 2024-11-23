@@ -827,8 +827,8 @@ def load_trained_model():
             # Target first generated token (target_inference_number)
             # Inject i = target_inference_number, where i is the i-th token for inference
             # For now just inject the first inference location
-            total_experiments = 4
-            number_of_parallelized_experiments = 2
+            total_experiments = 5
+            number_of_parallelized_experiments = 5
             target_inference_number = 1
 
             assert ((total_experiments % number_of_parallelized_experiments) == 0)
