@@ -1,4 +1,4 @@
-import torchtext; torchtext.disable_torchtext_deprecation_warning()
+import torchtext
 import os
 import onnx
 import torch
