@@ -174,8 +174,10 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
     quantizer_input_node = None
     quantizer_weight_node = None
 
+    """
     print("WEIGHT NAME:")
     print(weight_name)
+    """
     # Retrieve the quantizer node
     # Additional retrieval of transpose node to get axes
     transposed_output_name = None
@@ -228,8 +230,10 @@ def get_target_inputs(graph, layer_name, input_name, weight_name, bias_name, out
                             temporary_output_name = outer_node.output[0]
                 weight_intermediate_operations = intermediate_operation_names
 
+    """
     print(input_intermediate_operations)
     print(weight_intermediate_operations)
+    """
 
     check_1 = (int_input_tensor_name in quantizer_input_node.input) and (int_weight_tensor_name in quantizer_weight_node.input)
     check_2 = output_tensor in layer_node.output
